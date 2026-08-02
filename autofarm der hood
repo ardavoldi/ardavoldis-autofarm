@@ -412,7 +412,7 @@ end
 
 -- GUI Window Setup with Dynamic Game Name Title
 local Window = Library:CreateWindow({
-    Title        = gameName .. ' - fatmahook.legacy autofarm',
+    Title        = gameName .. ' - fatmahook autofarm | discord.gg/noirhub',
     Center       = true,
     AutoShow     = true,
     TabPadding   = 8,
