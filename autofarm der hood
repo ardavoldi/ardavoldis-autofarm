@@ -395,7 +395,7 @@ end
 
 -- GUI Window Setup with Dynamic Game Name Title
 local Window = Library:CreateWindow({
-    Title        = gameName .. ' - fatmahook.legacy autofarm',
+    Title        = gameName .. ' - fatmahook autofarm - .gg/noirhub',
     Center       = true,
     AutoShow     = true,
     TabPadding   = 8,
@@ -646,31 +646,475 @@ end)
 -- ══════════════════════════════════════════════════════════════════════
 -- 3. WORLD TAB
 -- ══════════════════════════════════════════════════════════════════════
-local WLeft = Tabs.World:AddLeftGroupbox('Environment')
 
-WLeft:AddToggle('FullBright', {
-    Text    = 'Fullbright',
-    Default = false,
-    Callback = function(val)
-        if val then
-            Lighting.Brightness = 2
-            Lighting.Ambient = Color3.fromRGB(255, 255, 255)
-            Lighting.FogEnd = 1e6
-        else
-            Lighting.Brightness = 1
-            Lighting.FogEnd = 1000
+-- Lighting Effects: get existing or create new
+local function _getOrCreateEffect(className, name)
+    local existing = Lighting:FindFirstChildOfClass(className)
+    if existing then return existing end
+    local e = Instance.new(className)
+    e.Name = name
+    e.Parent = Lighting
+    return e
+end
+
+local _cc      = _getOrCreateEffect("ColorCorrectionEffect", "HvH_CC")
+local _blur    = _getOrCreateEffect("BlurEffect",            "HvH_Blur")
+local _sunrays = _getOrCreateEffect("SunRaysEffect",         "HvH_SunRays")
+
+_cc.Enabled      = false
+_blur.Enabled    = false
+_blur.Size       = 0
+_sunrays.Enabled = false
+
+-- Save original lighting values for restore
+local _origClock      = Lighting.ClockTime
+local _origFogEnd     = Lighting.FogEnd
+local _origFogStart   = Lighting.FogStart
+local _origBrightness = Lighting.Brightness
+local _origAmbient    = Lighting.Ambient
+local _origFOV        = camera.FieldOfView
+local _origZoom       = player.CameraMaxZoomDistance
+
+-- Left groupboxes
+local WLeftCC    = Tabs.World:AddLeftGroupbox('color correction   atmosphere')
+local WLeftLight = Tabs.World:AddLeftGroupbox('lighting')
+
+-- Right groupboxes
+local WRightSky  = Tabs.World:AddRightGroupbox('skybox   weather   ambience')
+local WRightSun  = Tabs.World:AddRightGroupbox('sun rays')
+local WRightCam  = Tabs.World:AddRightGroupbox('camera')
+
+-- ────────────────────────────────────────
+-- COLOR CORRECTION
+-- ────────────────────────────────────────
+WLeftCC:AddToggle('CCEnabled', {
+    Text     = 'enabled',
+    Default  = false,
+    Callback = function(v)
+        _cc.Enabled = v
+    end
+}):AddColorPicker('CCTintColor', {
+    Default  = Color3.fromRGB(255, 255, 255),
+    Callback = function(v)
+        if Toggles.CCEnabled and Toggles.CCEnabled.Value then
+            _cc.TintColor = v
         end
     end
 })
 
-WLeft:AddSlider('TimeOfDaySlider', {
-    Text     = 'Time of Day',
-    Default  = 14,
-    Min      = 0,
-    Max      = 24,
+-- Saturation: -200 to 200 (÷100 → -2.0 to 2.0)
+WLeftCC:AddSlider('CCSaturation', {
+    Text     = 'saturation',
+    Default  = 0,
+    Min      = -200,
+    Max      = 200,
     Rounding = 0,
-    Callback = function(val)
-        Lighting.ClockTime = val
+    Callback = function(v)
+        _cc.Saturation = v / 100
+    end
+})
+
+-- Contrast: -100 to 100 (÷100 → -1.0 to 1.0)
+WLeftCC:AddSlider('CCContrast', {
+    Text     = 'contrast',
+    Default  = 0,
+    Min      = -100,
+    Max      = 100,
+    Rounding = 0,
+    Callback = function(v)
+        _cc.Contrast = v / 100
+    end
+})
+
+-- Brightness (CC): -100 to 100 (÷100 → -1.0 to 1.0)
+WLeftCC:AddSlider('CCBrightness', {
+    Text     = 'brightness',
+    Default  = 0,
+    Min      = -100,
+    Max      = 100,
+    Rounding = 0,
+    Callback = function(v)
+        _cc.Brightness = v / 100
+    end
+})
+
+-- ────────────────────────────────────────
+-- LIGHTING
+-- ────────────────────────────────────────
+WLeftLight:AddToggle('LightingAmbient', {
+    Text     = 'Ambient',
+    Default  = false,
+    Callback = function(v)
+        if Options.LightingAmbientColor then
+            Lighting.Ambient = v and Options.LightingAmbientColor.Value or _origAmbient
+        end
+    end
+}):AddColorPicker('LightingAmbientColor', {
+    Default  = Color3.fromRGB(127, 127, 127),
+    Callback = function(v)
+        if Toggles.LightingAmbient and Toggles.LightingAmbient.Value then
+            Lighting.Ambient = v
+        end
+    end
+})
+
+WLeftLight:AddToggle('LightingCSBot', {
+    Text     = 'ColorShift_Bottom',
+    Default  = false,
+    Callback = function(v)
+        if Options.LightingCSBotColor then
+            Lighting.ColorShift_Bottom = v and Options.LightingCSBotColor.Value or Color3.fromRGB(0,0,0)
+        end
+    end
+}):AddColorPicker('LightingCSBotColor', {
+    Default  = Color3.fromRGB(0, 0, 0),
+    Callback = function(v)
+        if Toggles.LightingCSBot and Toggles.LightingCSBot.Value then
+            Lighting.ColorShift_Bottom = v
+        end
+    end
+})
+
+WLeftLight:AddToggle('LightingCSTop', {
+    Text     = 'ColorShift_Top',
+    Default  = false,
+    Callback = function(v)
+        if Options.LightingCSTopColor then
+            Lighting.ColorShift_Top = v and Options.LightingCSTopColor.Value or Color3.fromRGB(0,0,0)
+        end
+    end
+}):AddColorPicker('LightingCSTopColor', {
+    Default  = Color3.fromRGB(0, 0, 0),
+    Callback = function(v)
+        if Toggles.LightingCSTop and Toggles.LightingCSTop.Value then
+            Lighting.ColorShift_Top = v
+        end
+    end
+})
+
+WLeftLight:AddToggle('LightingFogColor', {
+    Text     = 'FogColor',
+    Default  = false,
+    Callback = function(v)
+        if Options.LightingFogColorPick then
+            Lighting.FogColor = v and Options.LightingFogColorPick.Value or Color3.fromRGB(192,192,192)
+        end
+    end
+}):AddColorPicker('LightingFogColorPick', {
+    Default  = Color3.fromRGB(192, 192, 192),
+    Callback = function(v)
+        if Toggles.LightingFogColor and Toggles.LightingFogColor.Value then
+            Lighting.FogColor = v
+        end
+    end
+})
+
+WLeftLight:AddToggle('LightingFogEnd', {
+    Text     = 'FogEnd',
+    Default  = false,
+    Callback = function(v)
+        Lighting.FogEnd = v
+            and (Options.LightingFogEndVal and Options.LightingFogEndVal.Value or 500)
+            or _origFogEnd
+    end
+})
+WLeftLight:AddSlider('LightingFogEndVal', {
+    Text     = 'FogEnd',
+    Default  = 500,
+    Min      = 0,
+    Max      = 5000,
+    Rounding = 0,
+    Suffix   = 'studs',
+    Callback = function(v)
+        if Toggles.LightingFogEnd and Toggles.LightingFogEnd.Value then
+            Lighting.FogEnd = v
+        end
+    end
+})
+
+WLeftLight:AddToggle('LightingFogStart', {
+    Text     = 'FogStart',
+    Default  = false,
+    Callback = function(v)
+        Lighting.FogStart = v
+            and (Options.LightingFogStartVal and Options.LightingFogStartVal.Value or 0)
+            or _origFogStart
+    end
+})
+WLeftLight:AddSlider('LightingFogStartVal', {
+    Text     = 'FogStart',
+    Default  = 0,
+    Min      = 0,
+    Max      = 2000,
+    Rounding = 0,
+    Suffix   = 'studs',
+    Callback = function(v)
+        if Toggles.LightingFogStart and Toggles.LightingFogStart.Value then
+            Lighting.FogStart = v
+        end
+    end
+})
+
+-- ExposureCompensation: -50 to 50 (÷10 → -5.0 to 5.0)
+WLeftLight:AddToggle('LightingExposure', {
+    Text     = 'ExposureCompensation',
+    Default  = false,
+    Callback = function(v)
+        Lighting.ExposureCompensation = v
+            and (Options.LightingExposureVal and Options.LightingExposureVal.Value / 10 or 0.1)
+            or 0
+    end
+})
+WLeftLight:AddSlider('LightingExposureVal', {
+    Text     = 'ExposureCompensation',
+    Default  = 1,
+    Min      = -50,
+    Max      = 50,
+    Rounding = 0,
+    Callback = function(v)
+        if Toggles.LightingExposure and Toggles.LightingExposure.Value then
+            Lighting.ExposureCompensation = v / 10
+        end
+    end
+})
+
+-- Brightness: 0 to 100 (÷10 → 0 to 10.0)
+WLeftLight:AddToggle('LightingBrightness', {
+    Text     = 'Brightness',
+    Default  = false,
+    Callback = function(v)
+        Lighting.Brightness = v
+            and (Options.LightingBrightnessVal and Options.LightingBrightnessVal.Value / 10 or 1.1)
+            or _origBrightness
+    end
+})
+WLeftLight:AddSlider('LightingBrightnessVal', {
+    Text     = 'Brightness',
+    Default  = 11,
+    Min      = 0,
+    Max      = 100,
+    Rounding = 0,
+    Callback = function(v)
+        if Toggles.LightingBrightness and Toggles.LightingBrightness.Value then
+            Lighting.Brightness = v / 10
+        end
+    end
+})
+
+-- ClockTime: 0 to 240 (÷10 → 0h to 24h)
+WLeftLight:AddToggle('LightingClockTime', {
+    Text     = 'ClockTime',
+    Default  = false,
+    Callback = function(v)
+        Lighting.ClockTime = v
+            and (Options.LightingClockVal and Options.LightingClockVal.Value / 10 or 14)
+            or _origClock
+    end
+})
+WLeftLight:AddSlider('LightingClockVal', {
+    Text     = 'ClockTime',
+    Default  = 140,
+    Min      = 0,
+    Max      = 240,
+    Rounding = 0,
+    Suffix   = 'h',
+    Callback = function(v)
+        if Toggles.LightingClockTime and Toggles.LightingClockTime.Value then
+            Lighting.ClockTime = v / 10
+        end
+    end
+})
+
+WLeftLight:AddToggle('LightingGlobalShadows', {
+    Text     = 'GlobalShadows',
+    Default  = true,
+    Callback = function(v)
+        Lighting.GlobalShadows = v
+    end
+})
+
+WLeftLight:AddLabel('Technology')
+WLeftLight:AddDropdown('LightingTechnology', {
+    Values   = { 'ShadowMap', 'Voxel', 'Compatibility', 'Future' },
+    Default  = 1,
+    Text     = 'Technology',
+    Callback = function(v)
+        pcall(function()
+            Lighting.Technology = Enum.Technology[v]
+        end)
+    end
+})
+
+-- ────────────────────────────────────────
+-- SKYBOX / WEATHER / AMBIENCE
+-- ────────────────────────────────────────
+local weatherPresets = {
+    Afternoon = { clock=14,  fogEnd=1e6, fogStart=0, ambient=Color3.fromRGB(127,127,127), bright=2   },
+    Morning   = { clock=7,   fogEnd=900, fogStart=0, ambient=Color3.fromRGB(100,110,130), bright=1.5 },
+    Sunset    = { clock=19,  fogEnd=700, fogStart=0, ambient=Color3.fromRGB(200,100,60),  bright=1.8 },
+    Night     = { clock=0,   fogEnd=400, fogStart=0, ambient=Color3.fromRGB(20,20,50),    bright=0.3 },
+    Storm     = { clock=12,  fogEnd=180, fogStart=0, ambient=Color3.fromRGB(55,55,70),    bright=0.7 },
+    Blizzard  = { clock=12,  fogEnd=80,  fogStart=0, ambient=Color3.fromRGB(210,225,255), bright=1.2 },
+    Foggy     = { clock=10,  fogEnd=280, fogStart=0, ambient=Color3.fromRGB(175,175,175), bright=1   },
+}
+
+local function applyWeatherPreset(name)
+    local p = weatherPresets[name]
+    if not p then return end
+    Lighting.ClockTime  = p.clock
+    Lighting.FogEnd     = p.fogEnd
+    Lighting.FogStart   = p.fogStart
+    Lighting.Ambient    = p.ambient
+    Lighting.Brightness = p.bright
+end
+
+WRightSky:AddToggle('SkyboxToggle', {
+    Text     = 'enabled',
+    Default  = false,
+    Callback = function(v)
+        if v then
+            applyWeatherPreset(Options.SkyboxPreset and Options.SkyboxPreset.Value or 'Afternoon')
+        else
+            Lighting.ClockTime  = _origClock
+            Lighting.FogEnd     = _origFogEnd
+            Lighting.FogStart   = _origFogStart
+            Lighting.Brightness = _origBrightness
+            Lighting.Ambient    = _origAmbient
+        end
+    end
+})
+
+WRightSky:AddDropdown('SkyboxPreset', {
+    Values   = { 'Afternoon', 'Morning', 'Sunset', 'Night', 'Storm', 'Blizzard', 'Foggy' },
+    Default  = 1,
+    Text     = 'selected',
+    Callback = function(v)
+        if Toggles.SkyboxToggle and Toggles.SkyboxToggle.Value then
+            applyWeatherPreset(v)
+        end
+    end
+})
+
+-- ────────────────────────────────────────
+-- SUN RAYS
+-- ────────────────────────────────────────
+WRightSun:AddToggle('SunRaysToggle', {
+    Text     = 'override',
+    Default  = false,
+    Callback = function(v)
+        _sunrays.Enabled = v
+    end
+})
+
+-- Intensity: 0 to 100 (÷100 → 0.0 to 1.0)
+WRightSun:AddSlider('SunRaysIntensity', {
+    Text     = 'intensity',
+    Default  = 16,
+    Min      = 0,
+    Max      = 100,
+    Rounding = 0,
+    Callback = function(v)
+        _sunrays.Intensity = v / 100
+    end
+})
+
+-- Spread: 0 to 100 (÷100 → 0.0 to 1.0)
+WRightSun:AddSlider('SunRaysSpread', {
+    Text     = 'spread',
+    Default  = 100,
+    Min      = 0,
+    Max      = 100,
+    Rounding = 0,
+    Callback = function(v)
+        _sunrays.Spread = v / 100
+    end
+})
+
+-- ────────────────────────────────────────
+-- CAMERA
+-- ────────────────────────────────────────
+WRightCam:AddToggle('InfZoomToggle', {
+    Text     = 'infinite zoom',
+    Default  = false,
+    Callback = function(v)
+        player.CameraMaxZoomDistance = v and 999999 or _origZoom
+    end
+})
+
+WRightCam:AddToggle('FOVChangerToggle', {
+    Text     = 'fov changer',
+    Default  = false,
+    Callback = function(v)
+        camera.FieldOfView = v
+            and (Options.FOVChangerVal and Options.FOVChangerVal.Value or 70)
+            or _origFOV
+    end
+})
+
+WRightCam:AddSlider('FOVChangerVal', {
+    Text     = 'fov',
+    Default  = 70,
+    Min      = 10,
+    Max      = 120,
+    Rounding = 0,
+    Suffix   = '°',
+    Callback = function(v)
+        if Toggles.FOVChangerToggle and Toggles.FOVChangerToggle.Value then
+            camera.FieldOfView = v
+        end
+    end
+})
+
+WRightCam:AddToggle('AspectRatioToggle', {
+    Text     = 'aspect ratio',
+    Default  = false,
+    Callback = function(v)
+        if not v then
+            camera.FieldOfView = Options.FOVChangerVal and Options.FOVChangerVal.Value or _origFOV
+        end
+    end
+})
+
+WRightCam:AddSlider('AspectRatioX', {
+    Text     = 'ratio x',
+    Default  = 1,
+    Min      = 1,
+    Max      = 16,
+    Rounding = 0,
+    Callback = function(v)
+        if Toggles.AspectRatioToggle and Toggles.AspectRatioToggle.Value then
+            local y   = Options.AspectRatioY and Options.AspectRatioY.Value or 1
+            local fov = Options.FOVChangerVal and Options.FOVChangerVal.Value or 70
+            camera.FieldOfView = math.deg(2 * math.atan(math.tan(math.rad(fov / 2)) * (y / v)))
+        end
+    end
+})
+
+WRightCam:AddSlider('AspectRatioY', {
+    Text     = 'ratio y',
+    Default  = 1,
+    Min      = 1,
+    Max      = 16,
+    Rounding = 0,
+    Callback = function(v)
+        if Toggles.AspectRatioToggle and Toggles.AspectRatioToggle.Value then
+            local x   = Options.AspectRatioX and Options.AspectRatioX.Value or 1
+            local fov = Options.FOVChangerVal and Options.FOVChangerVal.Value or 70
+            camera.FieldOfView = math.deg(2 * math.atan(math.tan(math.rad(fov / 2)) * (v / x)))
+        end
+    end
+})
+
+WRightCam:AddSlider('BlurAmountSlider', {
+    Text     = 'blur',
+    Default  = 0,
+    Min      = 0,
+    Max      = 56,
+    Rounding = 0,
+    Suffix   = 'x',
+    Callback = function(v)
+        _blur.Enabled = v > 0
+        _blur.Size    = v
     end
 })
 
@@ -1358,6 +1802,17 @@ MenuBox:AddButton('Unload Script', function()
         if flyCon then flyCon:Disconnect() end
         if antiAfkCon then antiAfkCon:Disconnect() end
         if espScreenGui then espScreenGui:Destroy() end
+        -- Restore lighting on unload
+        Lighting.ClockTime  = _origClock
+        Lighting.FogEnd     = _origFogEnd
+        Lighting.FogStart   = _origFogStart
+        Lighting.Brightness = _origBrightness
+        Lighting.Ambient    = _origAmbient
+        camera.FieldOfView  = _origFOV
+        player.CameraMaxZoomDistance = _origZoom
+        if _cc then _cc:Destroy() end
+        if _blur then _blur:Destroy() end
+        if _sunrays then _sunrays:Destroy() end
         for _, p in ipairs(Players:GetPlayers()) do
             if p.Character and p.Character:FindFirstChild("HvHChams") then
                 p.Character.HvHChams:Destroy()
