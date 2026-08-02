@@ -395,7 +395,7 @@ end
 
 -- GUI Window Setup with Dynamic Game Name Title
 local Window = Library:CreateWindow({
-    Title        = gameName .. ' - HvH Framework',
+    Title        = gameName .. ' - fatmahook.legacy autofarm',
     Center       = true,
     AutoShow     = true,
     TabPadding   = 8,
