@@ -1,0 +1,1388 @@
+-- Der Hood - HvH Script
+
+-- ══════════════════════════════════════════════════════════════════════
+-- ADONIS ANTI-CHEAT BYPASS
+-- ══════════════════════════════════════════════════════════════════════
+pcall(function()
+    local g = getinfo or debug.getinfo
+    local d = false
+    local h = {}
+    local x, y
+
+    if setthreadidentity then setthreadidentity(2) end
+
+    if getgc and hookfunction then
+        for i, v in getgc(true) do
+            if typeof(v) == "table" then
+                local a = rawget(v, "Detected")
+                local b = rawget(v, "Kill")
+            
+                if typeof(a) == "function" and not x then
+                    x = a
+                    
+                    local o; o = hookfunction(x, function(c, f, n)
+                        if c ~= "_" then
+                            if d then
+                                warn(`Adonis AntiCheat flagged\nMethod: {c}\nInfo: {f}`)
+                            end
+                        end
+                        
+                        return true
+                    end)
+
+                    table.insert(h, x)
+                end
+
+                if rawget(v, "Variables") and rawget(v, "Process") and typeof(b) == "function" and not y then
+                    y = b
+                    local o; o = hookfunction(y, function(f)
+                        if d then
+                            warn(`Adonis AntiCheat tried to kill (fallback): {f}`)
+                        end
+                    end)
+
+                    table.insert(h, y)
+                end
+            end
+        end
+
+        if getrenv and getrenv().debug and getrenv().debug.info then
+            local o; o = hookfunction(getrenv().debug.info, newcclosure(function(...)
+                local a, f = ...
+
+                if x and a == x then
+                    if d then
+                        warn(`zins | adonis bypassed`)
+                    end
+
+                    return coroutine.yield(coroutine.running())
+                end
+                
+                return o(...)
+            end))
+        end
+    end
+
+    if setthreadidentity then setthreadidentity(7) end
+end)
+
+-- ══════════════════════════════════════════════════════════════════════
+-- LOAD LINORIA LIB
+-- ══════════════════════════════════════════════════════════════════════
+local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/'
+local Library      = loadstring(game:HttpGet(repo .. 'Library.lua'))()
+local ThemeManager = loadstring(game:HttpGet(repo .. 'addons/ThemeManager.lua'))()
+local SaveManager  = loadstring(game:HttpGet(repo .. 'addons/SaveManager.lua'))()
+
+-- Services
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService     = game:GetService("TweenService")
+local Lighting         = game:GetService("Lighting")
+local RS               = game:GetService("ReplicatedStorage")
+local TeleportService  = game:GetService("TeleportService")
+local HttpService      = game:GetService("HttpService")
+local MarketplaceService = game:GetService("MarketplaceService")
+
+local player  = Players.LocalPlayer
+local camera  = workspace.CurrentCamera
+local mouse   = player:GetMouse()
+
+-- Get Game Name
+local gameName = "Der Hood"
+pcall(function()
+    local info = MarketplaceService:GetProductInfo(game.PlaceId)
+    if info and info.Name then
+        gameName = info.Name
+    end
+end)
+
+-- Helper Functions
+local function getChar() return player.Character end
+local function getRoot()
+    local c = getChar(); return c and c:FindFirstChild("HumanoidRootPart")
+end
+local function getHum()
+    local c = getChar(); return c and c:FindFirstChildOfClass("Humanoid")
+end
+
+-- Remote Detection
+local MainRemoteEvent = nil
+
+local function updateRemotes()
+    if RS:FindFirstChild("MainRemotes") and RS.MainRemotes:FindFirstChild("MainRemoteEvent") then
+        MainRemoteEvent = RS.MainRemotes.MainRemoteEvent
+    elseif RS:FindFirstChild("GameRemotes") and RS.GameRemotes:FindFirstChild("MainGameEvent") then
+        MainRemoteEvent = RS.GameRemotes.MainGameEvent
+    else
+        MainRemoteEvent = RS:FindFirstChild("MainRemoteEvent", true) 
+                       or RS:FindFirstChild("MainGameEvent", true)
+                       or RS:FindFirstChild("MainEvent", true)
+    end
+end
+updateRemotes()
+
+-- Global Settings & State
+local autoKillEnabled   = false
+local silentAimEnabled  = true
+local headLockCam       = true
+local selectedWeapon    = "(No weapon)"
+local selectedTarget    = "(No players)"
+local shootDelay        = 0.03
+local orbitEnabled      = true
+local orbitRadius       = 5
+local orbitSpeed        = 4
+local orbitAngle        = 0
+local strafeEnabled     = false
+local stompAfterKill    = true
+local tpToTarget        = true
+local resolverEnabled   = false
+local resolverOffset    = 0
+local shootPart         = "Head"
+local killCount         = 0
+local currentStatus     = "Ready"
+
+-- Weapon Stats
+local WEAPON_STATS = {
+    ["[Revolver]"]         = { damage = 34, range = 250, maxAmmo = 6 },
+    ["[Double-Barrel SG]"] = { damage = 31, range = 75,  maxAmmo = 2 },
+    ["[TacticalShotgun]"]  = { damage = 25, range = 75,  maxAmmo = 6 },
+    ["[Knife]"]            = { damage = 45, range = 15,  maxAmmo = 99 },
+    ["Revolver"]           = { damage = 34, range = 250, maxAmmo = 6 },
+    ["Double-Barrel SG"]   = { damage = 31, range = 75,  maxAmmo = 2 },
+    ["TacticalShotgun"]    = { damage = 25, range = 75,  maxAmmo = 6 },
+}
+
+-- Player List
+local playerNames = {}
+local function rebuildPlayerList()
+    playerNames = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player then table.insert(playerNames, p.Name) end
+    end
+    if #playerNames == 0 then playerNames = {"(No players)"} end
+end
+rebuildPlayerList()
+Players.PlayerAdded:Connect(rebuildPlayerList)
+Players.PlayerRemoving:Connect(rebuildPlayerList)
+
+-- Inventory Weapons List
+local function getInventoryWeapons()
+    local list = {}
+    for _, t in ipairs(player.Backpack:GetChildren()) do
+        if t:IsA("Tool") then table.insert(list, t.Name) end
+    end
+    local c = getChar()
+    if c then
+        for _, t in ipairs(c:GetChildren()) do
+            if t:IsA("Tool") then table.insert(list, t.Name) end
+        end
+    end
+    if #list == 0 then list = {"(No weapon)"} end
+    return list
+end
+
+-- Weapon Equip
+local function equipWeapon(weaponName)
+    local c = getChar()
+    if c then
+        local current = c:FindFirstChildOfClass("Tool")
+        if current and (current.Name == weaponName or weaponName:find(current.Name, 1, true)) then
+            return current
+        end
+    end
+    local bp = player.Backpack:FindFirstChild(weaponName)
+    if bp then
+        local hum = getHum()
+        if hum then hum:EquipTool(bp) end
+        task.wait(0.05)
+        return bp
+    end
+    if c then
+        local tool = c:FindFirstChildOfClass("Tool")
+        if tool then return tool end
+    end
+    return nil
+end
+
+local function getCurrentTool()
+    local c = getChar(); if not c then return nil, nil end
+    local tool = c:FindFirstChildOfClass("Tool")
+    return tool, tool and tool:FindFirstChild("Handle")
+end
+
+local function getMuzzlePos(tool, handle)
+    if not handle then return Vector3.zero end
+    local default = tool:FindFirstChild("Default")
+    if default then
+        local mesh = default:FindFirstChild("Mesh")
+        if mesh then
+            local muzzle = mesh:FindFirstChild("Muzzle")
+            if muzzle then return muzzle.WorldPosition end
+        end
+    end
+    return handle.Position
+end
+
+-- Target Body Part
+local function getTargetTargetPart()
+    local target = Players:FindFirstChild(selectedTarget)
+    if not target or not target.Character then return nil end
+    return target.Character:FindFirstChild(shootPart)
+        or target.Character:FindFirstChild("Head")
+        or target.Character:FindFirstChild("HumanoidRootPart")
+end
+
+-- Check Downed / K.O Status
+local function isPlayerDowned(p)
+    if not p or not p.Character then return true end
+    local hum = p.Character:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return true end
+    
+    local be = p.Character:FindFirstChild("BodyEffects")
+    if be then
+        local ko = be:FindFirstChild("K.O") or be:FindFirstChild("KO") or be:FindFirstChild("KnockedOut")
+        if ko and ko.Value == true then return true end
+    end
+    
+    if hum.PlatformStand == true or hum.Health <= 15 then
+        return true
+    end
+    return false
+end
+
+-- Silent Aim Metatable Hook
+local getrawmetatable = getrawmetatable or debug.getrawmetatable
+local setreadonly     = setreadonly or make_writeable
+
+if getrawmetatable then
+    local grm = getrawmetatable(game)
+    local oldIndex = grm.__index
+    setreadonly(grm, false)
+
+    grm.__index = newcclosure(function(self, idx)
+        if not checkcaller() and (autoKillEnabled or silentAimEnabled) then
+            if idx == "Hit" or idx == "hit" then
+                local part = getTargetTargetPart()
+                if part then
+                    return CFrame.new(part.Position)
+                end
+            elseif idx == "Target" or idx == "target" then
+                local part = getTargetTargetPart()
+                if part then
+                    return part
+                end
+            end
+        end
+        return oldIndex(self, idx)
+    end)
+    setreadonly(grm, true)
+end
+
+-- Ammo & Reload Check
+local function checkAndReload(tool)
+    if not tool then return end
+    updateRemotes()
+
+    local ammo       = tool:FindFirstChild("Ammo")
+    local ammoClient = tool:FindFirstChild("AmmoClient")
+    local stats      = WEAPON_STATS[tool.Name] or { maxAmmo = 6 }
+    local maxAmmo    = stats.maxAmmo
+
+    local char = getChar()
+    local be   = char and char:FindFirstChild("BodyEffects")
+    local isReloading = be and be:FindFirstChild("Reload") and be.Reload.Value == true
+
+    if (ammo and ammo.Value <= 0) or (ammoClient and ammoClient.Value <= 0) or isReloading then
+        if MainRemoteEvent then
+            MainRemoteEvent:FireServer("Reload", tool)
+        end
+        if ammo       then ammo.Value = maxAmmo end
+        if ammoClient then ammoClient.Value = maxAmmo end
+        if isReloading then be.Reload.Value = false end
+    end
+end
+
+-- Trash Talk / Taunt Messages
+local tauntMessages = {
+    "ez down",
+    "sit down kid",
+    "clapped by ragebot",
+    "owned",
+    "uninstall game",
+    "gg no re"
+}
+local autoTauntEnabled = false
+
+local function triggerTaunt(targetName)
+    if not autoTauntEnabled then return end
+    local msg = tauntMessages[math.random(1, #tauntMessages)]
+    pcall(function()
+        if RS:FindFirstChild("DefaultChatSystemChatEvents") and RS.DefaultChatSystemChatEvents:FindFirstChild("SayMessageRequest") then
+            RS.DefaultChatSystemChatEvents.SayMessageRequest:FireServer(targetName .. " " .. msg, "All")
+        elseif TextChatService and TextChatService.TextChannels:FindFirstChild("RBXGeneral") then
+            TextChatService.TextChannels.RBXGeneral:SendAsync(targetName .. " " .. msg)
+        end
+    end)
+end
+
+-- Shooting Function
+local function fireShotAtTarget(tool, handle, targetPart, targetPlayer)
+    updateRemotes()
+    if not tool or not handle or not targetPart then return end
+
+    checkAndReload(tool)
+
+    local muzzlePos = getMuzzlePos(tool, handle)
+    local headPos   = targetPart.Position
+
+    if resolverOffset ~= 0 then
+        local rad = math.rad(resolverOffset)
+        headPos = headPos + Vector3.new(math.cos(rad) * 2, 0, math.sin(rad) * 2)
+    end
+
+    local stats  = WEAPON_STATS[tool.Name] or { damage = 34, range = 250 }
+    local range  = (tool:FindFirstChild("Range")  and tool.Range.Value)  or stats.range
+    local damage = (tool:FindFirstChild("Damage") and tool.Damage.Value) or stats.damage
+
+    if headLockCam then
+        camera.CFrame = CFrame.new(camera.CFrame.Position, headPos)
+    end
+
+    if MainRemoteEvent then
+        MainRemoteEvent:FireServer(
+            "ShootGun",
+            handle,
+            muzzlePos,
+            nil,
+            targetPart,
+            headPos,
+            Vector3.new(0, 1, 0),
+            range,
+            damage
+        )
+    end
+
+    local toolRE = tool:FindFirstChild("RemoteEvent")
+    if toolRE then
+        pcall(function() toolRE:FireServer(muzzlePos, headPos) end)
+    end
+
+    pcall(function() tool:Activate() end)
+
+    local ammo = tool:FindFirstChild("Ammo")
+    local ammoClient = tool:FindFirstChild("AmmoClient")
+    if ammo then ammo.Value = stats.maxAmmo end
+    if ammoClient then ammoClient.Value = stats.maxAmmo end
+end
+
+-- Stomp Function
+local function executeStomp(targetPlayer)
+    updateRemotes()
+    if not MainRemoteEvent then return end
+    local r  = getRoot()
+    local tr = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not r or not tr then return end
+
+    r.CFrame = CFrame.new(tr.Position + Vector3.new(0, 2.5, 0))
+    task.wait(0.03)
+
+    MainRemoteEvent:FireServer("Stomp")
+    task.wait(0.04)
+    MainRemoteEvent:FireServer("Stomp")
+end
+
+-- GUI Window Setup with Dynamic Game Name Title
+local Window = Library:CreateWindow({
+    Title        = gameName .. ' - HvH Framework',
+    Center       = true,
+    AutoShow     = true,
+    TabPadding   = 8,
+    MenuFadeTime = 0.2,
+})
+
+-- TABS
+local Tabs = {
+    Main      = Window:AddTab('main'),
+    Ragebot   = Window:AddTab('ragebot'),
+    World     = Window:AddTab('world'),
+    ESP       = Window:AddTab('esp'),
+    Visuals   = Window:AddTab('visuals'),
+    Character = Window:AddTab('character'),
+    Misc      = Window:AddTab('misc'),
+    Settings  = Window:AddTab('settings'),
+}
+
+-- ══════════════════════════════════════════════════════════════════════
+-- 1. MAIN TAB
+-- ══════════════════════════════════════════════════════════════════════
+local MInfo   = Tabs.Main:AddLeftGroupbox('Information')
+local MTarget = Tabs.Main:AddRightGroupbox('Targeting')
+
+MInfo:AddLabel('Status: Idle')
+MInfo:AddLabel('Game: ' .. gameName)
+MInfo:AddLabel('User: ' .. player.Name)
+
+MTarget:AddDropdown('MainTargetDrop', {
+    Values   = playerNames,
+    Default  = 1,
+    Text     = 'Selected Target',
+    Callback = function(val) selectedTarget = val end
+})
+
+MTarget:AddButton('Refresh Players', function()
+    rebuildPlayerList()
+    if Options.MainTargetDrop then Options.MainTargetDrop:SetValues(playerNames) end
+    if Options.TargetDrop then Options.TargetDrop:SetValues(playerNames) end
+end)
+
+-- ══════════════════════════════════════════════════════════════════════
+-- 2. RAGEBOT TAB
+-- ══════════════════════════════════════════════════════════════════════
+local RLeft   = Tabs.Ragebot:AddLeftGroupbox('Auto Kill / Stomp Combo')
+local RRight  = Tabs.Ragebot:AddRightGroupbox('Orbit / Strafe Mode')
+local RLeft2  = Tabs.Ragebot:AddLeftGroupbox('Resolver')
+local RRight2 = Tabs.Ragebot:AddRightGroupbox('Quick Actions')
+
+RLeft:AddDropdown('WeaponDrop', {
+    Values   = getInventoryWeapons(),
+    Default  = 1,
+    Text     = 'Selected Weapon',
+    Callback = function(val) selectedWeapon = val end
+})
+
+RLeft:AddButton('Refresh Inventory', function()
+    local inv = getInventoryWeapons()
+    if Options.WeaponDrop then Options.WeaponDrop:SetValues(inv) end
+end)
+
+RLeft:AddDropdown('TargetDrop', {
+    Values   = playerNames,
+    Default  = 1,
+    Text     = 'Target Player',
+    Callback = function(val) selectedTarget = val end
+})
+
+RLeft:AddDropdown('ShootPartDrop', {
+    Values   = { 'Head', 'HumanoidRootPart', 'UpperTorso', 'Torso' },
+    Default  = 1,
+    Text     = 'Hitbox Part',
+    Callback = function(val) shootPart = val end
+})
+
+RLeft:AddSlider('ShootDelayMs', {
+    Text     = 'Shot Delay (ms)',
+    Default  = 30,
+    Min      = 0,
+    Max      = 300,
+    Rounding = 0,
+    Callback = function(val) shootDelay = val / 1000 end
+})
+
+local autoKillCon
+RLeft:AddToggle('AutoKillToggle', {
+    Text    = 'Auto Kill + Auto Stomp',
+    Default = false,
+    Tooltip = 'Equips weapon, locks head, fires, and stomps downed targets',
+    Callback = function(val)
+        autoKillEnabled = val
+        if val then
+            autoKillCon = RunService.Heartbeat:Connect(function(dt)
+                local target = Players:FindFirstChild(selectedTarget)
+                if not target or not target.Character then
+                    currentStatus = "Waiting for target..."
+                    return
+                end
+
+                local tr   = target.Character:FindFirstChild("HumanoidRootPart")
+                local thum = target.Character:FindFirstChildOfClass("Humanoid")
+                local myRoot = getRoot()
+
+                if not tr or not thum or not myRoot then return end
+
+                equipWeapon(selectedWeapon)
+                local tool, handle = getCurrentTool()
+
+                local downed = isPlayerDowned(target)
+
+                if downed then
+                    currentStatus = "Target downed! Executing stomp..."
+                    if stompAfterKill then
+                        executeStomp(target)
+                        triggerTaunt(target.Name)
+                    end
+                    killCount = killCount + 1
+                    task.wait(0.1)
+                else
+                    if tpToTarget then
+                        if orbitEnabled then
+                            orbitAngle = orbitAngle + dt * orbitSpeed
+                            local ox = math.cos(orbitAngle) * orbitRadius
+                            local oz = math.sin(orbitAngle) * orbitRadius
+                            myRoot.CFrame = CFrame.new(tr.Position + Vector3.new(ox, 1, oz), tr.Position)
+                        elseif strafeEnabled then
+                            local swave = math.sin(tick() * 6) * 6
+                            myRoot.CFrame = CFrame.new(tr.Position + Vector3.new(swave, 1, 4), tr.Position)
+                        else
+                            myRoot.CFrame = tr.CFrame + Vector3.new(0, 0, 3)
+                        end
+                    end
+
+                    local targetPart = target.Character:FindFirstChild(shootPart) or target.Character:FindFirstChild("Head") or tr
+                    if tool and handle and targetPart then
+                        fireShotAtTarget(tool, handle, targetPart, target)
+                        currentStatus = string.format("Firing at head! HP: %.0f", thum.Health)
+                    end
+                    task.wait(shootDelay)
+                end
+            end)
+        else
+            if autoKillCon then autoKillCon:Disconnect(); autoKillCon = nil end
+            currentStatus = "Stopped"
+        end
+    end
+})
+
+RLeft:AddToggle('HeadLockCamToggle', {
+    Text    = 'Head Lock Camera',
+    Default = true,
+    Callback = function(val) headLockCam = val end
+})
+
+RLeft:AddToggle('StompAfterKill', {
+    Text    = 'Auto Stomp On Down',
+    Default = true,
+    Callback = function(val) stompAfterKill = val end
+})
+
+RLeft:AddToggle('TPToTargetToggle', {
+    Text    = 'TP / Follow Target',
+    Default = true,
+    Callback = function(val) tpToTarget = val end
+})
+
+RRight:AddToggle('OrbitToggle', {
+    Text    = 'Orbit Target',
+    Default = true,
+    Callback = function(val) orbitEnabled = val end
+})
+
+RRight:AddSlider('OrbitRadius', {
+    Text     = 'Orbit Radius',
+    Default  = 5,
+    Min      = 2,
+    Max      = 15,
+    Rounding = 0,
+    Callback = function(val) orbitRadius = val end
+})
+
+RRight:AddSlider('OrbitSpeed', {
+    Text     = 'Orbit Speed',
+    Default  = 4,
+    Min      = 1,
+    Max      = 15,
+    Rounding = 0,
+    Callback = function(val) orbitSpeed = val end
+})
+
+RRight:AddToggle('StrafeToggle', {
+    Text    = 'Strafe Mode',
+    Default = false,
+    Callback = function(val) strafeEnabled = val end
+})
+
+local resolverAngles = { 0, 45, 90, -45, -90, 135, -135, 180 }
+local resolverIdx    = 1
+
+RLeft2:AddToggle('ResolverToggle', {
+    Text    = 'Resolver',
+    Default = false,
+    Callback = function(val)
+        resolverEnabled = val
+        if val then
+            task.spawn(function()
+                while resolverEnabled do
+                    resolverOffset = resolverAngles[resolverIdx]
+                    resolverIdx = (resolverIdx % #resolverAngles) + 1
+                    task.wait(0.05)
+                end
+            end)
+        else
+            resolverOffset = 0
+        end
+    end
+})
+
+RLeft2:AddDropdown('ResolverMode', {
+    Values   = { 'Angle Cycle', 'Random', 'Flip 180' },
+    Default  = 1,
+    Text     = 'Resolver Mode',
+    Callback = function(val)
+        if val == 'Angle Cycle' then
+            resolverAngles = { 0, 45, 90, -45, -90, 135, -135, 180 }
+        elseif val == 'Random' then
+            resolverAngles = { math.random(-180, 180), math.random(-180, 180), 0 }
+        elseif val == 'Flip 180' then
+            resolverAngles = { 0, 180 }
+        end
+    end
+})
+
+RRight2:AddButton('Manual Stomp', function()
+    local target = Players:FindFirstChild(selectedTarget)
+    executeStomp(target)
+end)
+
+RRight2:AddButton('One-Tap Headshot', function()
+    local tool, handle = getCurrentTool()
+    local target = Players:FindFirstChild(selectedTarget)
+    if tool and handle and target and target.Character then
+        local part = target.Character:FindFirstChild(shootPart) or target.Character:FindFirstChild("Head")
+        if part then fireShotAtTarget(tool, handle, part, target) end
+    end
+end)
+
+-- ══════════════════════════════════════════════════════════════════════
+-- 3. WORLD TAB
+-- ══════════════════════════════════════════════════════════════════════
+local WLeft = Tabs.World:AddLeftGroupbox('Environment')
+
+WLeft:AddToggle('FullBright', {
+    Text    = 'Fullbright',
+    Default = false,
+    Callback = function(val)
+        if val then
+            Lighting.Brightness = 2
+            Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+            Lighting.FogEnd = 1e6
+        else
+            Lighting.Brightness = 1
+            Lighting.FogEnd = 1000
+        end
+    end
+})
+
+WLeft:AddSlider('TimeOfDaySlider', {
+    Text     = 'Time of Day',
+    Default  = 14,
+    Min      = 0,
+    Max      = 24,
+    Rounding = 0,
+    Callback = function(val)
+        Lighting.ClockTime = val
+    end
+})
+
+-- ══════════════════════════════════════════════════════════════════════
+-- 4. ESP TAB
+-- ══════════════════════════════════════════════════════════════════════
+local ELeft         = Tabs.ESP:AddLeftGroupbox('esp')
+local ERightApp     = Tabs.ESP:AddRightGroupbox('override appearance')
+local ERightChams   = Tabs.ESP:AddRightGroupbox('chams')
+local ERightText    = Tabs.ESP:AddRightGroupbox('text')
+
+ELeft:AddToggle('ESPBox', { Text = 'box', Default = true }):AddColorPicker('BoxColor', { Default = Color3.fromRGB(255, 255, 255) })
+ELeft:AddToggle('ESPFill', { Text = 'fill', Default = false }):AddColorPicker('FillColor', { Default = Color3.fromRGB(168, 85, 247) })
+ELeft:AddToggle('ESPName', { Text = 'name', Default = true }):AddColorPicker('NameColor', { Default = Color3.fromRGB(168, 85, 247) })
+
+ELeft:AddSlider('ESPRotation', { Text = 'rotation', Default = 0, Min = 0, Max = 360, Rounding = 0, Suffix = '°' })
+
+ELeft:AddToggle('ESPExploiter', { Text = 'exploiter', Default = false }):AddColorPicker('ExploiterColor', { Default = Color3.fromRGB(255, 255, 255) })
+ELeft:AddToggle('ESPWeapon', { Text = 'weapon', Default = true }):AddColorPicker('WeaponColor', { Default = Color3.fromRGB(255, 255, 255) })
+ELeft:AddToggle('ESPDistance', { Text = 'distance', Default = true }):AddColorPicker('DistanceColor', { Default = Color3.fromRGB(200, 200, 200) })
+ELeft:AddToggle('ESPAccuracy', { Text = 'accuracy', Default = false }):AddColorPicker('AccuracyColor', { Default = Color3.fromRGB(255, 255, 255) })
+
+ELeft:AddToggle('ESPHealthbar', { Text = 'healthbar', Default = true })
+ELeft:AddToggle('ESPArmor', { Text = 'armor', Default = true })
+ELeft:AddToggle('ESPResizeOutline', { Text = 'resize outline', Default = true })
+ELeft:AddToggle('ESPMovingHealthbar', { Text = 'moving healthbar', Default = false })
+
+ELeft:AddDropdown('ESPHealthbarType', {
+    Values  = { 'gradient', 'solid', 'segmented' },
+    Default = 1,
+    Text    = 'healthbar type'
+})
+
+ELeft:AddSlider('ESPSlices', { Text = 'slices', Default = 1, Min = 1, Max = 10, Rounding = 0 })
+ELeft:AddSlider('ESPSpeed', { Text = 'speed', Default = 1, Min = 1, Max = 10, Rounding = 0 })
+ELeft:AddSlider('ESPHealthLerp', { Text = 'health lerp', Default = 0.05, Min = 0, Max = 1, Rounding = 2 })
+
+ERightApp:AddToggle('AppEnabled', { Text = 'enabled', Default = false })
+ERightApp:AddToggle('AppMaterial', { Text = 'material', Default = false })
+ERightApp:AddToggle('AppColor', { Text = 'color', Default = false }):AddColorPicker('AppColorPicker', { Default = Color3.fromRGB(255, 255, 255) })
+ERightApp:AddToggle('AppDisable', { Text = 'disable', Default = false })
+
+ERightApp:AddDropdown('AppMaterialSelect', {
+    Values  = { '--', 'ForceField', 'Neon', 'Plastic', 'Glass' },
+    Default = 1,
+    Text    = 'material select'
+})
+
+ERightApp:AddSlider('AppTransparency', { Text = 'transparency', Default = 100, Min = 0, Max = 100, Rounding = 0, Suffix = '%' })
+
+ERightChams:AddToggle('ChamsEnabled', { Text = 'enabled', Default = true }):AddColorPicker('ChamColor1', { Default = Color3.fromRGB(168, 85, 247) })
+ERightChams:AddLabel('outline color'):AddColorPicker('ChamColor2', { Default = Color3.fromRGB(255, 255, 255) })
+
+ERightChams:AddSlider('ChamFillTrans', { Text = 'fill transparency', Default = 5, Min = 0, Max = 10, Rounding = 0 })
+ERightChams:AddSlider('ChamOutlineTrans', { Text = 'outline transparency', Default = 0, Min = 0, Max = 10, Rounding = 0 })
+
+ERightChams:AddDropdown('ChamSettings', {
+    Values  = { '--', 'AlwaysOnTop', 'Occluded' },
+    Default = 2,
+    Text    = 'cham settings'
+})
+
+ERightText:AddDropdown('ESPFont', {
+    Values  = { 'proggy clean', 'UI', 'System', 'Plex', 'Monospace' },
+    Default = 1,
+    Text    = 'font'
+})
+
+ERightText:AddDropdown('ESPNameType', {
+    Values  = { 'Name', 'DisplayName', 'Both' },
+    Default = 1,
+    Text    = 'name type'
+})
+
+ERightText:AddDropdown('ESPAccuracyType', {
+    Values  = { 'server', 'client' },
+    Default = 1,
+    Text    = 'accuracy type'
+})
+
+-- 2D CORNER BOX & ACCURATE WALLHACK ESP ENGINE
+local espScreenGui = Instance.new("ScreenGui")
+espScreenGui.Name = "HvH_External_ESP"
+espScreenGui.ResetOnSpawn = false
+espScreenGui.IgnoreGuiInset = true
+
+local guiParented = false
+pcall(function()
+    if gethui then
+        espScreenGui.Parent = gethui()
+        guiParented = true
+    elseif syn and syn.protect_gui then
+        syn.protect_gui(espScreenGui)
+        espScreenGui.Parent = game:GetService("CoreGui")
+        guiParented = true
+    else
+        espScreenGui.Parent = game:GetService("CoreGui")
+        guiParented = true
+    end
+end)
+
+if not guiParented then
+    pcall(function()
+        espScreenGui.Parent = player:WaitForChild("PlayerGui")
+    end)
+end
+
+local playerESPComponents = {}
+
+local function createCornerLine(parent)
+    local f = Instance.new("Frame")
+    f.BorderSizePixel = 0
+    f.Parent = parent
+    return f
+end
+
+local function createESPComponents(p)
+    local container = Instance.new("Frame")
+    container.BackgroundTransparency = 1
+    container.Size = UDim2.new(0, 0, 0, 0)
+    container.Visible = false
+    container.Parent = espScreenGui
+
+    local fillBox = Instance.new("Frame")
+    fillBox.Name = "Fill"
+    fillBox.BorderSizePixel = 0
+    fillBox.Parent = container
+
+    local cornerLines = {
+        TL_H = createCornerLine(container),
+        TL_V = createCornerLine(container),
+        TR_H = createCornerLine(container),
+        TR_V = createCornerLine(container),
+        BL_H = createCornerLine(container),
+        BL_V = createCornerLine(container),
+        BR_H = createCornerLine(container),
+        BR_V = createCornerLine(container),
+    }
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "Name"
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Font = Enum.Font.Code
+    nameLabel.TextSize = 12
+    nameLabel.TextStrokeTransparency = 0.3
+    nameLabel.Parent = container
+
+    local weaponLabel = Instance.new("TextLabel")
+    weaponLabel.Name = "Weapon"
+    weaponLabel.BackgroundTransparency = 1
+    weaponLabel.Font = Enum.Font.Code
+    weaponLabel.TextSize = 11
+    weaponLabel.TextStrokeTransparency = 0.3
+    weaponLabel.Parent = container
+
+    local distLabel = Instance.new("TextLabel")
+    distLabel.Name = "Distance"
+    distLabel.BackgroundTransparency = 1
+    distLabel.Font = Enum.Font.Code
+    distLabel.TextSize = 10
+    distLabel.TextStrokeTransparency = 0.3
+    distLabel.Parent = container
+
+    local healthFrame = Instance.new("Frame")
+    healthFrame.Name = "HealthFrame"
+    healthFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    healthFrame.BorderSizePixel = 1
+    healthFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
+    healthFrame.Parent = container
+
+    local healthBar = Instance.new("Frame")
+    healthBar.Name = "HealthBar"
+    healthBar.BorderSizePixel = 0
+    healthBar.Parent = healthFrame
+
+    local armorFrame = Instance.new("Frame")
+    armorFrame.Name = "ArmorFrame"
+    armorFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    armorFrame.BorderSizePixel = 1
+    armorFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
+    armorFrame.Parent = container
+
+    local armorBar = Instance.new("Frame")
+    armorBar.Name = "ArmorBar"
+    armorBar.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+    armorBar.BorderSizePixel = 0
+    armorBar.Parent = armorFrame
+
+    playerESPComponents[p.Name] = {
+        Container = container,
+        FillBox = fillBox,
+        Corners = cornerLines,
+        NameLabel = nameLabel,
+        WeaponLabel = weaponLabel,
+        DistLabel = distLabel,
+        HealthFrame = healthFrame,
+        HealthBar = healthBar,
+        ArmorFrame = armorFrame,
+        ArmorBar = armorBar
+    }
+end
+
+local function removeESPComponents(pName)
+    if playerESPComponents[pName] then
+        if playerESPComponents[pName].Container then
+            playerESPComponents[pName].Container:Destroy()
+        end
+        playerESPComponents[pName] = nil
+    end
+end
+
+Players.PlayerRemoving:Connect(function(p)
+    removeESPComponents(p.Name)
+end)
+
+-- Main Render Loop for Wallhack ESP & Highlight Chams
+RunService.RenderStepped:Connect(function()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player then
+            local char = p.Character
+            local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+            local head = char and char:FindFirstChild("Head")
+            local hum  = char and char:FindFirstChildOfClass("Humanoid")
+
+            -- Chams Handler
+            if char then
+                local highlight = char:FindFirstChild("HvHChams")
+                if Toggles and Toggles.ChamsEnabled and Toggles.ChamsEnabled.Value then
+                    if not highlight then
+                        highlight = Instance.new("Highlight")
+                        highlight.Name = "HvHChams"
+                        highlight.Parent = char
+                    end
+                    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                    highlight.FillColor = Options and Options.ChamColor1 and Options.ChamColor1.Value or Color3.fromRGB(168, 85, 247)
+                    highlight.OutlineColor = Options and Options.ChamColor2 and Options.ChamColor2.Value or Color3.fromRGB(255, 255, 255)
+                    highlight.FillTransparency = (Options and Options.ChamFillTrans and Options.ChamFillTrans.Value or 5) / 10
+                    highlight.OutlineTransparency = (Options and Options.ChamOutlineTrans and Options.ChamOutlineTrans.Value or 0) / 10
+                else
+                    if highlight then highlight:Destroy() end
+                end
+            end
+
+            -- 2D Wallhack ESP Handler
+            if char and hrp and head and hum and hum.Health > 0 then
+                if not playerESPComponents[p.Name] then
+                    createESPComponents(p)
+                end
+
+                local comp = playerESPComponents[p.Name]
+                local headPos = head.Position + Vector3.new(0, 0.8, 0)
+                local feetPos = hrp.Position - Vector3.new(0, 3.2, 0)
+
+                local headScreen, visHead = camera:WorldToViewportPoint(headPos)
+                local feetScreen, visFeet = camera:WorldToViewportPoint(feetPos)
+
+                if visHead or visFeet then
+                    comp.Container.Visible = true
+
+                    local boxHeight = math.abs(feetScreen.Y - headScreen.Y)
+                    local boxWidth = boxHeight * 0.55
+                    local posX = headScreen.X - boxWidth / 2
+                    local posY = headScreen.Y
+
+                    comp.Container.Position = UDim2.new(0, posX, 0, posY)
+                    comp.Container.Size = UDim2.new(0, boxWidth, 0, boxHeight)
+
+                    -- 2D Corner Box Render
+                    local boxColor = Options and Options.BoxColor and Options.BoxColor.Value or Color3.fromRGB(255, 255, 255)
+                    local cornerLen = math.clamp(boxWidth * 0.25, 4, 15)
+
+                    if Toggles and Toggles.ESPBox and Toggles.ESPBox.Value then
+                        for _, line in pairs(comp.Corners) do line.Visible = true; line.BackgroundColor3 = boxColor end
+                        
+                        -- Top-Left
+                        comp.Corners.TL_H.Position = UDim2.new(0, 0, 0, 0)
+                        comp.Corners.TL_H.Size = UDim2.new(0, cornerLen, 0, 2)
+                        comp.Corners.TL_V.Position = UDim2.new(0, 0, 0, 0)
+                        comp.Corners.TL_V.Size = UDim2.new(0, 2, 0, cornerLen)
+
+                        -- Top-Right
+                        comp.Corners.TR_H.Position = UDim2.new(1, -cornerLen, 0, 0)
+                        comp.Corners.TR_H.Size = UDim2.new(0, cornerLen, 0, 2)
+                        comp.Corners.TR_V.Position = UDim2.new(1, -2, 0, 0)
+                        comp.Corners.TR_V.Size = UDim2.new(0, 2, 0, cornerLen)
+
+                        -- Bottom-Left
+                        comp.Corners.BL_H.Position = UDim2.new(0, 0, 1, -2)
+                        comp.Corners.BL_H.Size = UDim2.new(0, cornerLen, 0, 2)
+                        comp.Corners.BL_V.Position = UDim2.new(0, 0, 1, -cornerLen)
+                        comp.Corners.BL_V.Size = UDim2.new(0, 2, 0, cornerLen)
+
+                        -- Bottom-Right
+                        comp.Corners.BR_H.Position = UDim2.new(1, -cornerLen, 1, -2)
+                        comp.Corners.BR_H.Size = UDim2.new(0, cornerLen, 0, 2)
+                        comp.Corners.BR_V.Position = UDim2.new(1, -2, 1, -cornerLen)
+                        comp.Corners.BR_V.Size = UDim2.new(0, 2, 0, cornerLen)
+                    else
+                        for _, line in pairs(comp.Corners) do line.Visible = false end
+                    end
+
+                    -- Box Fill Inside
+                    if Toggles and Toggles.ESPFill and Toggles.ESPFill.Value then
+                        comp.FillBox.Visible = true
+                        comp.FillBox.Size = UDim2.new(1, 0, 1, 0)
+                        comp.FillBox.BackgroundColor3 = Options and Options.FillColor and Options.FillColor.Value or Color3.fromRGB(168, 85, 247)
+                        comp.FillBox.BackgroundTransparency = 0.75
+                    else
+                        comp.FillBox.Visible = false
+                    end
+
+                    -- Name Label
+                    if Toggles and Toggles.ESPName and Toggles.ESPName.Value then
+                        comp.NameLabel.Visible = true
+                        comp.NameLabel.Text = p.Name
+                        comp.NameLabel.TextColor3 = Options and Options.NameColor and Options.NameColor.Value or Color3.fromRGB(168, 85, 247)
+                        comp.NameLabel.Position = UDim2.new(0, 0, 0, -16)
+                        comp.NameLabel.Size = UDim2.new(1, 0, 0, 14)
+                    else
+                        comp.NameLabel.Visible = false
+                    end
+
+                    -- Weapon Label
+                    if Toggles and Toggles.ESPWeapon and Toggles.ESPWeapon.Value then
+                        local tool = char:FindFirstChildOfClass("Tool")
+                        comp.WeaponLabel.Visible = true
+                        comp.WeaponLabel.Text = tool and tool.Name or "[Bare Hands]"
+                        comp.WeaponLabel.TextColor3 = Options and Options.WeaponColor and Options.WeaponColor.Value or Color3.fromRGB(255, 255, 255)
+                        comp.WeaponLabel.Position = UDim2.new(0, 0, 1, 2)
+                        comp.WeaponLabel.Size = UDim2.new(1, 0, 0, 12)
+                    else
+                        comp.WeaponLabel.Visible = false
+                    end
+
+                    -- Distance Label
+                    if Toggles and Toggles.ESPDistance and Toggles.ESPDistance.Value then
+                        local myRoot = getRoot()
+                        local dist = myRoot and math.floor((hrp.Position - myRoot.Position).Magnitude) or 0
+                        comp.DistLabel.Visible = true
+                        comp.DistLabel.Text = dist .. "m"
+                        comp.DistLabel.TextColor3 = Options and Options.DistanceColor and Options.DistanceColor.Value or Color3.fromRGB(200, 200, 200)
+                        comp.DistLabel.Position = UDim2.new(0, 0, 1, (Toggles and Toggles.ESPWeapon and Toggles.ESPWeapon.Value) and 14 or 2)
+                        comp.DistLabel.Size = UDim2.new(1, 0, 0, 12)
+                    else
+                        comp.DistLabel.Visible = false
+                    end
+
+                    -- Healthbar
+                    if Toggles and Toggles.ESPHealthbar and Toggles.ESPHealthbar.Value then
+                        comp.HealthFrame.Visible = true
+                        comp.HealthFrame.Position = UDim2.new(0, -6, 0, 0)
+                        comp.HealthFrame.Size = UDim2.new(0, 4, 1, 0)
+
+                        local hpPercent = math.clamp(hum.Health / (hum.MaxHealth > 0 and hum.MaxHealth or 100), 0, 1)
+                        comp.HealthBar.Size = UDim2.new(1, 0, hpPercent, 0)
+                        comp.HealthBar.Position = UDim2.new(0, 0, 1 - hpPercent, 0)
+
+                        if Options and Options.ESPHealthbarType and Options.ESPHealthbarType.Value == "gradient" then
+                            comp.HealthBar.BackgroundColor3 = Color3.fromHSV(hpPercent * 0.3, 0.9, 0.9)
+                        else
+                            comp.HealthBar.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+                        end
+                    else
+                        comp.HealthFrame.Visible = false
+                    end
+
+                    -- Armorbar
+                    if Toggles and Toggles.ESPArmor and Toggles.ESPArmor.Value then
+                        local armorVal = 0
+                        local be = char:FindFirstChild("BodyEffects")
+                        if be and be:FindFirstChild("Armor") then
+                            armorVal = math.clamp(be.Armor.Value, 0, 100)
+                        end
+                        comp.ArmorFrame.Visible = true
+                        comp.ArmorFrame.Position = UDim2.new(0, -12, 0, 0)
+                        comp.ArmorFrame.Size = UDim2.new(0, 4, 1, 0)
+
+                        local armorPercent = armorVal / 100
+                        comp.ArmorBar.Size = UDim2.new(1, 0, armorPercent, 0)
+                        comp.ArmorBar.Position = UDim2.new(0, 0, 1 - armorPercent, 0)
+                    else
+                        comp.ArmorFrame.Visible = false
+                    end
+                else
+                    comp.Container.Visible = false
+                end
+            else
+                if playerESPComponents[p.Name] then
+                    playerESPComponents[p.Name].Container.Visible = false
+                end
+            end
+        end
+    end
+end)
+
+-- ══════════════════════════════════════════════════════════════════════
+-- 5. VISUALS TAB
+-- ══════════════════════════════════════════════════════════════════════
+local VLeft  = Tabs.Visuals:AddLeftGroupbox('Render')
+local VRight = Tabs.Visuals:AddRightGroupbox('Weapon Override / Chams')
+
+VLeft:AddToggle('FOVCircle', { Text = 'Draw FOV', Default = false })
+VLeft:AddSlider('FOVRadius', { Text = 'FOV Radius', Default = 150, Min = 30, Max = 500, Rounding = 0 })
+
+-- Advanced Weapon Override Controls
+VRight:AddToggle('WepOverrideEnabled', { Text = 'Enable Weapon Override', Default = false })
+VRight:AddDropdown('WepTargetSelection', {
+    Values  = { 'All Weapons', 'Double-Barrel SG', 'Revolver', 'TacticalShotgun', 'Knife' },
+    Default = 1,
+    Text    = 'Target Weapon'
+})
+VRight:AddDropdown('WepOverrideMaterial', {
+    Values  = { 'ForceField', 'Glass', 'Neon', 'Plastic', 'SmoothPlastic' },
+    Default = 1,
+    Text    = 'Material'
+})
+VRight:AddLabel('Weapon Color'):AddColorPicker('WepOverrideColor', { Default = Color3.fromRGB(168, 85, 247) })
+VRight:AddSlider('WepOverrideTrans', { Text = 'Transparency', Default = 0, Min = 0, Max = 100, Rounding = 0, Suffix = '%' })
+
+local originalWeaponState = {}
+
+RunService.RenderStepped:Connect(function()
+    if Toggles and Toggles.WepOverrideEnabled and Toggles.WepOverrideEnabled.Value then
+        local tool, _ = getCurrentTool()
+        if tool then
+            local targetSelect = Options and Options.WepTargetSelection and Options.WepTargetSelection.Value or "All Weapons"
+            local weaponName   = tool.Name
+
+            local matches = (targetSelect == "All Weapons") or weaponName:find(targetSelect, 1, true)
+
+            if matches then
+                local matName = Options and Options.WepOverrideMaterial and Options.WepOverrideMaterial.Value or "ForceField"
+                local color   = Options and Options.WepOverrideColor and Options.WepOverrideColor.Value or Color3.fromRGB(168, 85, 247)
+                local trans   = (Options and Options.WepOverrideTrans and Options.WepOverrideTrans.Value or 0) / 100
+                local enumMat = Enum.Material[matName] or Enum.Material.ForceField
+
+                for _, obj in ipairs(tool:GetDescendants()) do
+                    if obj:IsA("BasePart") or obj:IsA("MeshPart") then
+                        if not originalWeaponState[obj] then
+                            originalWeaponState[obj] = {
+                                Material     = obj.Material,
+                                Color        = obj.Color,
+                                Transparency = obj.Transparency,
+                                TextureID    = obj:IsA("MeshPart") and obj.TextureID or nil
+                            }
+                        end
+
+                        obj.Material     = enumMat
+                        obj.Color        = color
+                        obj.Transparency = trans
+
+                        if obj:IsA("MeshPart") and (matName == "ForceField" or matName == "Glass" or matName == "Neon") then
+                            obj.TextureID = ""
+                        end
+                    elseif obj:IsA("SpecialMesh") then
+                        if not originalWeaponState[obj] then
+                            originalWeaponState[obj] = { TextureId = obj.TextureId }
+                        end
+                        if matName == "ForceField" or matName == "Glass" or matName == "Neon" then
+                            obj.TextureId = ""
+                        end
+                    elseif obj:IsA("SurfaceAppearance") then
+                        obj.Enabled = false
+                    end
+                end
+            end
+        end
+    else
+        for obj, orig in pairs(originalWeaponState) do
+            if obj and obj.Parent then
+                if orig.Material then obj.Material = orig.Material end
+                if orig.Color then obj.Color = orig.Color end
+                if orig.Transparency then obj.Transparency = orig.Transparency end
+                if orig.TextureID and obj:IsA("MeshPart") then obj.TextureID = orig.TextureID end
+                if orig.TextureId and obj:IsA("SpecialMesh") then obj.TextureId = orig.TextureId end
+            end
+        end
+        originalWeaponState = {}
+    end
+end)
+
+-- ══════════════════════════════════════════════════════════════════════
+-- 6. CHARACTER TAB
+-- ══════════════════════════════════════════════════════════════════════
+local CLeft  = Tabs.Character:AddLeftGroupbox('Fly')
+local CRight = Tabs.Character:AddRightGroupbox('Movement')
+
+local flySpeed = 60
+local flyVel, flyGyro, flyCon
+
+local function enableFly()
+    local root = getRoot(); local hum = getHum()
+    if not root or not hum then return end
+    hum.PlatformStand = true
+    flyVel = Instance.new("BodyVelocity")
+    flyVel.Velocity = Vector3.zero; flyVel.MaxForce = Vector3.new(1e5,1e5,1e5)
+    flyVel.P = 1e4; flyVel.Parent = root
+    flyGyro = Instance.new("BodyGyro")
+    flyGyro.MaxTorque = Vector3.new(1e5,1e5,1e5)
+    flyGyro.P = 1e4; flyGyro.D = 500
+    flyGyro.CFrame = root.CFrame; flyGyro.Parent = root
+    local vel = Vector3.zero
+    flyCon = RunService.Heartbeat:Connect(function(dt)
+        local r = getRoot(); if not r or not flyVel then return end
+        local cf = camera.CFrame
+        local fwd = Vector3.new(cf.LookVector.X, 0, cf.LookVector.Z).Unit
+        local rgt = Vector3.new(cf.RightVector.X, 0, cf.RightVector.Z).Unit
+        local dir = Vector3.zero
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += fwd end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= fwd end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += rgt end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir -= rgt end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space)     then dir += Vector3.new(0,1,0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir -= Vector3.new(0,1,0) end
+        local target = dir.Magnitude > 0 and dir.Unit * flySpeed or Vector3.zero
+        vel = vel:Lerp(target, math.min(1, 8*dt))
+        flyVel.Velocity = vel
+        flyGyro.CFrame  = CFrame.new(r.Position, r.Position + fwd)
+    end)
+end
+
+local function disableFly()
+    if flyCon  then flyCon:Disconnect();  flyCon  = nil end
+    if flyVel  then flyVel:Destroy();     flyVel  = nil end
+    if flyGyro then flyGyro:Destroy();    flyGyro = nil end
+    local h = getHum(); if h then h.PlatformStand = false end
+end
+
+CLeft:AddToggle('FlyToggle', {
+    Text    = 'Fly [F Key]',
+    Default = false,
+    Callback = function(val) if val then enableFly() else disableFly() end end
+})
+CLeft:AddSlider('FlySpd', {
+    Text     = 'Fly Speed',
+    Default  = 60,
+    Min      = 5,
+    Max      = 500,
+    Rounding = 0,
+    Callback = function(val) flySpeed = val end
+})
+
+local walkSpeed = 50; local jumpPower = 100; local infJump = false
+
+CRight:AddToggle('SpeedBoost', {
+    Text    = 'Speed Boost',
+    Default = false,
+    Callback = function(val)
+        local h = getHum(); if h then h.WalkSpeed = val and walkSpeed or 16 end
+    end
+})
+CRight:AddSlider('WalkSpd', {
+    Text     = 'Walk Speed',
+    Default  = 50,
+    Min      = 16,
+    Max      = 500,
+    Rounding = 0,
+    Callback = function(val) walkSpeed = val; local h = getHum(); if h then h.WalkSpeed = val end end
+})
+CRight:AddToggle('JumpBoost', {
+    Text    = 'Jump Boost',
+    Default = false,
+    Callback = function(val)
+        local h = getHum(); if h then h.UseJumpPower = true; h.JumpPower = val and jumpPower or 50 end
+    end
+})
+CRight:AddSlider('JumpPwr', {
+    Text     = 'Jump Power',
+    Default  = 100,
+    Min      = 50,
+    Max      = 500,
+    Rounding = 0,
+    Callback = function(val) jumpPower = val; local h = getHum(); if h then h.UseJumpPower = true; h.JumpPower = val end end
+})
+CRight:AddToggle('InfJump2', {
+    Text    = 'Infinite Jump',
+    Default = false,
+    Callback = function(val) infJump = val end
+})
+
+UserInputService.JumpRequest:Connect(function()
+    if infJump then local h = getHum(); if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end end
+end)
+
+UserInputService.InputBegan:Connect(function(inp, gpe)
+    if gpe then return end
+    if inp.KeyCode == Enum.KeyCode.F then
+        local tog = Toggles.FlyToggle
+        if tog then tog:SetValue(not tog.Value) end
+    end
+end)
+
+-- ══════════════════════════════════════════════════════════════════════
+-- 7. MISC TAB
+-- ══════════════════════════════════════════════════════════════════════
+local MLeftMisc  = Tabs.Misc:AddLeftGroupbox('HvH Utilities')
+local MRightMisc = Tabs.Misc:AddRightGroupbox('Server & Client')
+
+MLeftMisc:AddToggle('AutoTaunt', {
+    Text    = 'Auto Trash Talk (Chat On Kill)',
+    Default = false,
+    Tooltip = 'Automatically sends classic HvH taunts in chat when stomping a target',
+    Callback = function(val) autoTauntEnabled = val end
+})
+
+local antiAfkCon
+MLeftMisc:AddToggle('AntiAFK', {
+    Text    = 'Anti-AFK (Prevent Kick)',
+    Default = true,
+    Tooltip = 'Prevents Roblox 20-minute idle disconnects',
+    Callback = function(val)
+        if val then
+            local VirtualUser = game:GetService("VirtualUser")
+            antiAfkCon = player.Idled:Connect(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new(0, 0))
+            end)
+        else
+            if antiAfkCon then antiAfkCon:Disconnect(); antiAfkCon = nil end
+        end
+    end
+})
+
+MLeftMisc:AddButton('Auto Buy Armor & Ammo', function()
+    updateRemotes()
+    if MainRemoteEvent then
+        MainRemoteEvent:FireServer("BuyArmor")
+        MainRemoteEvent:FireServer("BuyAmmo")
+    end
+end)
+
+MRightMisc:AddButton('Rejoin Server', function()
+    TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
+end)
+
+MRightMisc:AddButton('Server Hop', function()
+    task.spawn(function()
+        local servers = {}
+        local req = game:HttpGet("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100")
+        local data = HttpService:JSONDecode(req)
+        if data and data.data then
+            for _, server in ipairs(data.data) do
+                if server.playing < server.maxPlayers and server.id ~= game.JobId then
+                    table.insert(servers, server.id)
+                end
+            end
+        end
+        if #servers > 0 then
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, servers[math.random(1, #servers)], player)
+        end
+    end)
+end)
+
+-- ══════════════════════════════════════════════════════════════════════
+-- 8. SETTINGS TAB
+-- ══════════════════════════════════════════════════════════════════════
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({'WeaponDrop','TargetDrop','ShootPartDrop','SAPartDrop','ResolverMode','MainTargetDrop','WepTargetSelection'})
+
+ThemeManager:SetFolder('DersHoodHvH')
+SaveManager:SetFolder('DersHoodHvH/configs')
+
+ThemeManager:ApplyToTab(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
+
+local MenuBox = Tabs.Settings:AddLeftGroupbox('Menu Keybind & Control')
+
+MenuBox:AddLabel('Menu Keybind'):AddKeypicker('MenuKeybind', {
+    Default  = 'End',
+    NoUI     = false,
+    Text     = 'Menu Keybind',
+    Callback = function()
+        Library:Toggle()
+    end
+})
+
+MenuBox:AddButton('Unload Script', function()
+    pcall(function()
+        if autoKillCon then autoKillCon:Disconnect() end
+        if cdCon then cdCon:Disconnect() end
+        if infAmmoCon then infAmmoCon:Disconnect() end
+        if flyCon then flyCon:Disconnect() end
+        if antiAfkCon then antiAfkCon:Disconnect() end
+        if espScreenGui then espScreenGui:Destroy() end
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p.Character and p.Character:FindFirstChild("HvHChams") then
+                p.Character.HvHChams:Destroy()
+            end
+        end
+    end)
+    Library:Unload()
+end)
+
+-- Watermark with Game Name
+Library:SetWatermarkVisibility(true)
+local FrameTimer = tick()
+local FrameCounter = 0
+local FPS = 60
+
+RunService.RenderStepped:Connect(function()
+    FrameCounter = FrameCounter + 1
+    if tick() - FrameTimer >= 1 then
+        FPS = FrameCounter
+        FrameCounter = 0
+        FrameTimer = tick()
+        Library:SetWatermark(string.format('%s | %d fps | %d ms', gameName, FPS, math.floor(player:GetNetworkPing() * 1000)))
+    end
+end)
+
+SaveManager:LoadAutoloadConfig()
+
+print("Der Hood - HvH Script Loaded Successfully")
