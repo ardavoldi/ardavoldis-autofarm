@@ -1,4 +1,4 @@
--- Der Hood - HvH Script
+-- Der Hood - HvH Script (Full Custom Visuals & Advanced HvH Engine)
 
 -- ══════════════════════════════════════════════════════════════════════
 -- ADONIS ANTI-CHEAT BYPASS
@@ -107,6 +107,22 @@ local function getHum()
     local c = getChar(); return c and c:FindFirstChildOfClass("Humanoid")
 end
 
+-- ForceField & Body Tracking Helpers
+local function hasForceField(char)
+    if not char then return false end
+    return char:FindFirstChildOfClass("ForceField") ~= nil 
+        or char:FindFirstChild("ForceField") ~= nil
+        or char:FindFirstChild("FF") ~= nil
+end
+
+local function getDownedBodyPart(targetChar)
+    if not targetChar then return nil end
+    return targetChar:FindFirstChild("UpperTorso")
+        or targetChar:FindFirstChild("Torso")
+        or targetChar:FindFirstChild("HumanoidRootPart")
+        or targetChar:FindFirstChild("Head")
+end
+
 -- Remote Detection
 local MainRemoteEvent = nil
 
@@ -142,6 +158,7 @@ local resolverOffset    = 0
 local shootPart         = "Head"
 local killCount         = 0
 local currentStatus     = "Ready"
+local skyHeight         = 1500
 
 -- Weapon Stats
 local WEAPON_STATS = {
@@ -382,10 +399,10 @@ local function executeStomp(targetPlayer)
     updateRemotes()
     if not MainRemoteEvent then return end
     local r  = getRoot()
-    local tr = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not r or not tr then return end
+    local bodyPart = targetPlayer and targetPlayer.Character and getDownedBodyPart(targetPlayer.Character)
+    if not r or not bodyPart then return end
 
-    r.CFrame = CFrame.new(tr.Position + Vector3.new(0, 2.5, 0))
+    r.CFrame = CFrame.new(bodyPart.Position + Vector3.new(0, 2.5, 0))
     task.wait(0.03)
 
     MainRemoteEvent:FireServer("Stomp")
@@ -395,7 +412,7 @@ end
 
 -- GUI Window Setup with Dynamic Game Name Title
 local Window = Library:CreateWindow({
-    Title        = gameName .. ' - fatmahook autofarm - .gg/noirhub',
+    Title        = gameName .. ' - fatmahook.legacy autofarm',
     Center       = true,
     AutoShow     = true,
     TabPadding   = 8,
@@ -484,37 +501,56 @@ local autoKillCon
 RLeft:AddToggle('AutoKillToggle', {
     Text    = 'Start Autofarm',
     Default = false,
-    Tooltip = 'Equips weapon, locks head, fires, and stomps downed targets',
+    Tooltip = 'Equips weapon, fires, follows downed body, stomps, and hides in sky during FF',
     Callback = function(val)
         autoKillEnabled = val
         if val then
             autoKillCon = RunService.Heartbeat:Connect(function(dt)
                 local target = Players:FindFirstChild(selectedTarget)
+                local myRoot = getRoot()
+                if not myRoot then return end
+
                 if not target or not target.Character then
-                    currentStatus = "Waiting for target..."
+                    myRoot.CFrame = CFrame.new(myRoot.Position.X, skyHeight, myRoot.Position.Z)
+                    currentStatus = "Waiting for target to spawn..."
                     return
                 end
 
-                local tr   = target.Character:FindFirstChild("HumanoidRootPart")
-                local thum = target.Character:FindFirstChildOfClass("Humanoid")
-                local myRoot = getRoot()
+                local targetChar = target.Character
+                local thum = targetChar:FindFirstChildOfClass("Humanoid")
 
-                if not tr or not thum or not myRoot then return end
+                if not thum or thum.Health <= 0 then
+                    myRoot.CFrame = CFrame.new(myRoot.Position.X, skyHeight, myRoot.Position.Z)
+                    currentStatus = "Target dead! Waiting in sky for respawn..."
+                    return
+                end
+
+                if hasForceField(targetChar) then
+                    myRoot.CFrame = CFrame.new(myRoot.Position.X, skyHeight, myRoot.Position.Z)
+                    currentStatus = "Target has ForceField! Waiting in sky..."
+                    return
+                end
 
                 equipWeapon(selectedWeapon)
                 local tool, handle = getCurrentTool()
-
                 local downed = isPlayerDowned(target)
 
                 if downed then
-                    currentStatus = "Target downed! Executing stomp..."
+                    local bodyPart = getDownedBodyPart(targetChar)
+                    if bodyPart then
+                        myRoot.CFrame = CFrame.new(bodyPart.Position + Vector3.new(0, 2.5, 0))
+                    end
+
+                    currentStatus = "Target downed! Following body & stomping..."
                     if stompAfterKill then
                         executeStomp(target)
                         triggerTaunt(target.Name)
                     end
-                    killCount = killCount + 1
-                    task.wait(0.1)
+                    task.wait(0.05)
                 else
+                    local tr = targetChar:FindFirstChild("HumanoidRootPart") or getDownedBodyPart(targetChar)
+                    if not tr then return end
+
                     if tpToTarget then
                         if orbitEnabled then
                             orbitAngle = orbitAngle + dt * orbitSpeed
@@ -529,10 +565,10 @@ RLeft:AddToggle('AutoKillToggle', {
                         end
                     end
 
-                    local targetPart = target.Character:FindFirstChild(shootPart) or target.Character:FindFirstChild("Head") or tr
+                    local targetPart = targetChar:FindFirstChild(shootPart) or targetChar:FindFirstChild("Head") or tr
                     if tool and handle and targetPart then
                         fireShotAtTarget(tool, handle, targetPart, target)
-                        currentStatus = string.format("Firing at head! HP: %.0f", thum.Health)
+                        currentStatus = string.format("Firing at target! HP: %.0f", thum.Health)
                     end
                     task.wait(shootDelay)
                 end
@@ -647,7 +683,6 @@ end)
 -- 3. WORLD TAB
 -- ══════════════════════════════════════════════════════════════════════
 
--- Lighting Effects: get existing or create new
 local function _getOrCreateEffect(className, name)
     local existing = Lighting:FindFirstChildOfClass(className)
     if existing then return existing end
@@ -666,7 +701,6 @@ _blur.Enabled    = false
 _blur.Size       = 0
 _sunrays.Enabled = false
 
--- Save original lighting values for restore
 local _origClock      = Lighting.ClockTime
 local _origFogEnd     = Lighting.FogEnd
 local _origFogStart   = Lighting.FogStart
@@ -675,148 +709,89 @@ local _origAmbient    = Lighting.Ambient
 local _origFOV        = camera.FieldOfView
 local _origZoom       = player.CameraMaxZoomDistance
 
--- Left groupboxes
 local WLeftCC    = Tabs.World:AddLeftGroupbox('color correction   atmosphere')
 local WLeftLight = Tabs.World:AddLeftGroupbox('lighting')
 
--- Right groupboxes
 local WRightSky  = Tabs.World:AddRightGroupbox('skybox   weather   ambience')
 local WRightSun  = Tabs.World:AddRightGroupbox('sun rays')
 local WRightCam  = Tabs.World:AddRightGroupbox('camera')
 
--- ────────────────────────────────────────
--- COLOR CORRECTION
--- ────────────────────────────────────────
 WLeftCC:AddToggle('CCEnabled', {
     Text     = 'enabled',
     Default  = false,
-    Callback = function(v)
-        _cc.Enabled = v
-    end
+    Callback = function(v) _cc.Enabled = v end
 }):AddColorPicker('CCTintColor', {
     Default  = Color3.fromRGB(255, 255, 255),
-    Callback = function(v)
-        if Toggles.CCEnabled and Toggles.CCEnabled.Value then
-            _cc.TintColor = v
-        end
-    end
+    Callback = function(v) if Toggles.CCEnabled and Toggles.CCEnabled.Value then _cc.TintColor = v end end
 })
 
--- Saturation: -200 to 200 (÷100 → -2.0 to 2.0)
 WLeftCC:AddSlider('CCSaturation', {
     Text     = 'saturation',
     Default  = 0,
     Min      = -200,
     Max      = 200,
     Rounding = 0,
-    Callback = function(v)
-        _cc.Saturation = v / 100
-    end
+    Callback = function(v) _cc.Saturation = v / 100 end
 })
 
--- Contrast: -100 to 100 (÷100 → -1.0 to 1.0)
 WLeftCC:AddSlider('CCContrast', {
     Text     = 'contrast',
     Default  = 0,
     Min      = -100,
     Max      = 100,
     Rounding = 0,
-    Callback = function(v)
-        _cc.Contrast = v / 100
-    end
+    Callback = function(v) _cc.Contrast = v / 100 end
 })
 
--- Brightness (CC): -100 to 100 (÷100 → -1.0 to 1.0)
 WLeftCC:AddSlider('CCBrightness', {
     Text     = 'brightness',
     Default  = 0,
     Min      = -100,
     Max      = 100,
     Rounding = 0,
-    Callback = function(v)
-        _cc.Brightness = v / 100
-    end
+    Callback = function(v) _cc.Brightness = v / 100 end
 })
 
--- ────────────────────────────────────────
--- LIGHTING
--- ────────────────────────────────────────
 WLeftLight:AddToggle('LightingAmbient', {
     Text     = 'Ambient',
     Default  = false,
-    Callback = function(v)
-        if Options.LightingAmbientColor then
-            Lighting.Ambient = v and Options.LightingAmbientColor.Value or _origAmbient
-        end
-    end
+    Callback = function(v) if Options.LightingAmbientColor then Lighting.Ambient = v and Options.LightingAmbientColor.Value or _origAmbient end end
 }):AddColorPicker('LightingAmbientColor', {
     Default  = Color3.fromRGB(127, 127, 127),
-    Callback = function(v)
-        if Toggles.LightingAmbient and Toggles.LightingAmbient.Value then
-            Lighting.Ambient = v
-        end
-    end
+    Callback = function(v) if Toggles.LightingAmbient and Toggles.LightingAmbient.Value then Lighting.Ambient = v end end
 })
 
 WLeftLight:AddToggle('LightingCSBot', {
     Text     = 'ColorShift_Bottom',
     Default  = false,
-    Callback = function(v)
-        if Options.LightingCSBotColor then
-            Lighting.ColorShift_Bottom = v and Options.LightingCSBotColor.Value or Color3.fromRGB(0,0,0)
-        end
-    end
+    Callback = function(v) if Options.LightingCSBotColor then Lighting.ColorShift_Bottom = v and Options.LightingCSBotColor.Value or Color3.fromRGB(0,0,0) end end
 }):AddColorPicker('LightingCSBotColor', {
     Default  = Color3.fromRGB(0, 0, 0),
-    Callback = function(v)
-        if Toggles.LightingCSBot and Toggles.LightingCSBot.Value then
-            Lighting.ColorShift_Bottom = v
-        end
-    end
+    Callback = function(v) if Toggles.LightingCSBot and Toggles.LightingCSBot.Value then Lighting.ColorShift_Bottom = v end end
 })
 
 WLeftLight:AddToggle('LightingCSTop', {
     Text     = 'ColorShift_Top',
     Default  = false,
-    Callback = function(v)
-        if Options.LightingCSTopColor then
-            Lighting.ColorShift_Top = v and Options.LightingCSTopColor.Value or Color3.fromRGB(0,0,0)
-        end
-    end
+    Callback = function(v) if Options.LightingCSTopColor then Lighting.ColorShift_Top = v and Options.LightingCSTopColor.Value or Color3.fromRGB(0,0,0) end end
 }):AddColorPicker('LightingCSTopColor', {
     Default  = Color3.fromRGB(0, 0, 0),
-    Callback = function(v)
-        if Toggles.LightingCSTop and Toggles.LightingCSTop.Value then
-            Lighting.ColorShift_Top = v
-        end
-    end
+    Callback = function(v) if Toggles.LightingCSTop and Toggles.LightingCSTop.Value then Lighting.ColorShift_Top = v end end
 })
 
 WLeftLight:AddToggle('LightingFogColor', {
     Text     = 'FogColor',
     Default  = false,
-    Callback = function(v)
-        if Options.LightingFogColorPick then
-            Lighting.FogColor = v and Options.LightingFogColorPick.Value or Color3.fromRGB(192,192,192)
-        end
-    end
+    Callback = function(v) if Options.LightingFogColorPick then Lighting.FogColor = v and Options.LightingFogColorPick.Value or Color3.fromRGB(192,192,192) end end
 }):AddColorPicker('LightingFogColorPick', {
     Default  = Color3.fromRGB(192, 192, 192),
-    Callback = function(v)
-        if Toggles.LightingFogColor and Toggles.LightingFogColor.Value then
-            Lighting.FogColor = v
-        end
-    end
+    Callback = function(v) if Toggles.LightingFogColor and Toggles.LightingFogColor.Value then Lighting.FogColor = v end end
 })
 
 WLeftLight:AddToggle('LightingFogEnd', {
     Text     = 'FogEnd',
     Default  = false,
-    Callback = function(v)
-        Lighting.FogEnd = v
-            and (Options.LightingFogEndVal and Options.LightingFogEndVal.Value or 500)
-            or _origFogEnd
-    end
+    Callback = function(v) Lighting.FogEnd = v and (Options.LightingFogEndVal and Options.LightingFogEndVal.Value or 500) or _origFogEnd end
 })
 WLeftLight:AddSlider('LightingFogEndVal', {
     Text     = 'FogEnd',
@@ -825,21 +800,13 @@ WLeftLight:AddSlider('LightingFogEndVal', {
     Max      = 5000,
     Rounding = 0,
     Suffix   = 'studs',
-    Callback = function(v)
-        if Toggles.LightingFogEnd and Toggles.LightingFogEnd.Value then
-            Lighting.FogEnd = v
-        end
-    end
+    Callback = function(v) if Toggles.LightingFogEnd and Toggles.LightingFogEnd.Value then Lighting.FogEnd = v end end
 })
 
 WLeftLight:AddToggle('LightingFogStart', {
     Text     = 'FogStart',
     Default  = false,
-    Callback = function(v)
-        Lighting.FogStart = v
-            and (Options.LightingFogStartVal and Options.LightingFogStartVal.Value or 0)
-            or _origFogStart
-    end
+    Callback = function(v) Lighting.FogStart = v and (Options.LightingFogStartVal and Options.LightingFogStartVal.Value or 0) or _origFogStart end
 })
 WLeftLight:AddSlider('LightingFogStartVal', {
     Text     = 'FogStart',
@@ -848,22 +815,13 @@ WLeftLight:AddSlider('LightingFogStartVal', {
     Max      = 2000,
     Rounding = 0,
     Suffix   = 'studs',
-    Callback = function(v)
-        if Toggles.LightingFogStart and Toggles.LightingFogStart.Value then
-            Lighting.FogStart = v
-        end
-    end
+    Callback = function(v) if Toggles.LightingFogStart and Toggles.LightingFogStart.Value then Lighting.FogStart = v end end
 })
 
--- ExposureCompensation: -50 to 50 (÷10 → -5.0 to 5.0)
 WLeftLight:AddToggle('LightingExposure', {
     Text     = 'ExposureCompensation',
     Default  = false,
-    Callback = function(v)
-        Lighting.ExposureCompensation = v
-            and (Options.LightingExposureVal and Options.LightingExposureVal.Value / 10 or 0.1)
-            or 0
-    end
+    Callback = function(v) Lighting.ExposureCompensation = v and (Options.LightingExposureVal and Options.LightingExposureVal.Value / 10 or 0.1) or 0 end
 })
 WLeftLight:AddSlider('LightingExposureVal', {
     Text     = 'ExposureCompensation',
@@ -871,22 +829,13 @@ WLeftLight:AddSlider('LightingExposureVal', {
     Min      = -50,
     Max      = 50,
     Rounding = 0,
-    Callback = function(v)
-        if Toggles.LightingExposure and Toggles.LightingExposure.Value then
-            Lighting.ExposureCompensation = v / 10
-        end
-    end
+    Callback = function(v) if Toggles.LightingExposure and Toggles.LightingExposure.Value then Lighting.ExposureCompensation = v / 10 end end
 })
 
--- Brightness: 0 to 100 (÷10 → 0 to 10.0)
 WLeftLight:AddToggle('LightingBrightness', {
     Text     = 'Brightness',
     Default  = false,
-    Callback = function(v)
-        Lighting.Brightness = v
-            and (Options.LightingBrightnessVal and Options.LightingBrightnessVal.Value / 10 or 1.1)
-            or _origBrightness
-    end
+    Callback = function(v) Lighting.Brightness = v and (Options.LightingBrightnessVal and Options.LightingBrightnessVal.Value / 10 or 1.1) or _origBrightness end
 })
 WLeftLight:AddSlider('LightingBrightnessVal', {
     Text     = 'Brightness',
@@ -894,22 +843,13 @@ WLeftLight:AddSlider('LightingBrightnessVal', {
     Min      = 0,
     Max      = 100,
     Rounding = 0,
-    Callback = function(v)
-        if Toggles.LightingBrightness and Toggles.LightingBrightness.Value then
-            Lighting.Brightness = v / 10
-        end
-    end
+    Callback = function(v) if Toggles.LightingBrightness and Toggles.LightingBrightness.Value then Lighting.Brightness = v / 10 end end
 })
 
--- ClockTime: 0 to 240 (÷10 → 0h to 24h)
 WLeftLight:AddToggle('LightingClockTime', {
     Text     = 'ClockTime',
     Default  = false,
-    Callback = function(v)
-        Lighting.ClockTime = v
-            and (Options.LightingClockVal and Options.LightingClockVal.Value / 10 or 14)
-            or _origClock
-    end
+    Callback = function(v) Lighting.ClockTime = v and (Options.LightingClockVal and Options.LightingClockVal.Value / 10 or 14) or _origClock end
 })
 WLeftLight:AddSlider('LightingClockVal', {
     Text     = 'ClockTime',
@@ -918,19 +858,13 @@ WLeftLight:AddSlider('LightingClockVal', {
     Max      = 240,
     Rounding = 0,
     Suffix   = 'h',
-    Callback = function(v)
-        if Toggles.LightingClockTime and Toggles.LightingClockTime.Value then
-            Lighting.ClockTime = v / 10
-        end
-    end
+    Callback = function(v) if Toggles.LightingClockTime and Toggles.LightingClockTime.Value then Lighting.ClockTime = v / 10 end end
 })
 
 WLeftLight:AddToggle('LightingGlobalShadows', {
     Text     = 'GlobalShadows',
     Default  = true,
-    Callback = function(v)
-        Lighting.GlobalShadows = v
-    end
+    Callback = function(v) Lighting.GlobalShadows = v end
 })
 
 WLeftLight:AddLabel('Technology')
@@ -938,16 +872,9 @@ WLeftLight:AddDropdown('LightingTechnology', {
     Values   = { 'ShadowMap', 'Voxel', 'Compatibility', 'Future' },
     Default  = 1,
     Text     = 'Technology',
-    Callback = function(v)
-        pcall(function()
-            Lighting.Technology = Enum.Technology[v]
-        end)
-    end
+    Callback = function(v) pcall(function() Lighting.Technology = Enum.Technology[v] end) end
 })
 
--- ────────────────────────────────────────
--- SKYBOX / WEATHER / AMBIENCE
--- ────────────────────────────────────────
 local weatherPresets = {
     Afternoon = { clock=14,  fogEnd=1e6, fogStart=0, ambient=Color3.fromRGB(127,127,127), bright=2   },
     Morning   = { clock=7,   fogEnd=900, fogStart=0, ambient=Color3.fromRGB(100,110,130), bright=1.5 },
@@ -995,60 +922,40 @@ WRightSky:AddDropdown('SkyboxPreset', {
     end
 })
 
--- ────────────────────────────────────────
--- SUN RAYS
--- ────────────────────────────────────────
 WRightSun:AddToggle('SunRaysToggle', {
     Text     = 'override',
     Default  = false,
-    Callback = function(v)
-        _sunrays.Enabled = v
-    end
+    Callback = function(v) _sunrays.Enabled = v end
 })
 
--- Intensity: 0 to 100 (÷100 → 0.0 to 1.0)
 WRightSun:AddSlider('SunRaysIntensity', {
     Text     = 'intensity',
     Default  = 16,
     Min      = 0,
     Max      = 100,
     Rounding = 0,
-    Callback = function(v)
-        _sunrays.Intensity = v / 100
-    end
+    Callback = function(v) _sunrays.Intensity = v / 100 end
 })
 
--- Spread: 0 to 100 (÷100 → 0.0 to 1.0)
 WRightSun:AddSlider('SunRaysSpread', {
     Text     = 'spread',
     Default  = 100,
     Min      = 0,
     Max      = 100,
     Rounding = 0,
-    Callback = function(v)
-        _sunrays.Spread = v / 100
-    end
+    Callback = function(v) _sunrays.Spread = v / 100 end
 })
 
--- ────────────────────────────────────────
--- CAMERA
--- ────────────────────────────────────────
 WRightCam:AddToggle('InfZoomToggle', {
     Text     = 'infinite zoom',
     Default  = false,
-    Callback = function(v)
-        player.CameraMaxZoomDistance = v and 999999 or _origZoom
-    end
+    Callback = function(v) player.CameraMaxZoomDistance = v and 999999 or _origZoom end
 })
 
 WRightCam:AddToggle('FOVChangerToggle', {
     Text     = 'fov changer',
     Default  = false,
-    Callback = function(v)
-        camera.FieldOfView = v
-            and (Options.FOVChangerVal and Options.FOVChangerVal.Value or 70)
-            or _origFOV
-    end
+    Callback = function(v) camera.FieldOfView = v and (Options.FOVChangerVal and Options.FOVChangerVal.Value or 70) or _origFOV end
 })
 
 WRightCam:AddSlider('FOVChangerVal', {
@@ -1058,21 +965,13 @@ WRightCam:AddSlider('FOVChangerVal', {
     Max      = 120,
     Rounding = 0,
     Suffix   = '°',
-    Callback = function(v)
-        if Toggles.FOVChangerToggle and Toggles.FOVChangerToggle.Value then
-            camera.FieldOfView = v
-        end
-    end
+    Callback = function(v) if Toggles.FOVChangerToggle and Toggles.FOVChangerToggle.Value then camera.FieldOfView = v end end
 })
 
 WRightCam:AddToggle('AspectRatioToggle', {
     Text     = 'aspect ratio',
     Default  = false,
-    Callback = function(v)
-        if not v then
-            camera.FieldOfView = Options.FOVChangerVal and Options.FOVChangerVal.Value or _origFOV
-        end
-    end
+    Callback = function(v) if not v then camera.FieldOfView = Options.FOVChangerVal and Options.FOVChangerVal.Value or _origFOV end end
 })
 
 WRightCam:AddSlider('AspectRatioX', {
@@ -1511,88 +1410,574 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ══════════════════════════════════════════════════════════════════════
--- 5. VISUALS TAB
+-- 5. VISUALS TAB (WITH SUB-TAB TABBOXES & ORIGINAL STATE RESTORATION)
 -- ══════════════════════════════════════════════════════════════════════
-local VLeft  = Tabs.Visuals:AddLeftGroupbox('Render')
-local VRight = Tabs.Visuals:AddRightGroupbox('Weapon Override / Chams')
 
-VLeft:AddToggle('FOVCircle', { Text = 'Draw FOV', Default = false })
-VLeft:AddSlider('FOVRadius', { Text = 'FOV Radius', Default = 150, Min = 30, Max = 500, Rounding = 0 })
+-- Left Column Tabboxes & Groupboxes
+local SelfTabbox         = Tabs.Visuals:AddLeftTabbox()
+local VLeftSelfStyle     = SelfTabbox:AddTab('self style')
+local VLeftSelfEffects   = SelfTabbox:AddTab('self effects')
 
--- Advanced Weapon Override Controls
-VRight:AddToggle('WepOverrideEnabled', { Text = 'Enable Weapon Override', Default = false })
-VRight:AddDropdown('WepTargetSelection', {
-    Values  = { 'All Weapons', 'Double-Barrel SG', 'Revolver', 'TacticalShotgun', 'Knife' },
-    Default = 1,
-    Text    = 'Target Weapon'
+local TracerTabbox       = Tabs.Visuals:AddLeftTabbox()
+local VLeftOverrideTracer= TracerTabbox:AddTab('override tracer')
+local VLeftCustomTracers = TracerTabbox:AddTab('custom tracers')
+
+local VLeftShootSnd      = Tabs.Visuals:AddLeftGroupbox('override shoot sound')
+local VLeftCrosshair     = Tabs.Visuals:AddLeftGroupbox('crosshair')
+
+-- Right Column Groupboxes & Tabboxes
+local VRightTool         = Tabs.Visuals:AddRightGroupbox('tool style')
+
+local HitTabbox          = Tabs.Visuals:AddRightTabbox()
+local VRightHitEffects   = HitTabbox:AddTab('hit effects')
+local VRightHitSounds    = HitTabbox:AddTab('hit sounds')
+
+local VRightInd          = Tabs.Visuals:AddRightGroupbox('indicators')
+
+-- ────────────────────────────────────────
+-- 1. SELF TABBOX (self style | self effects)
+-- ────────────────────────────────────────
+VLeftSelfStyle:AddToggle('SelfMaterialToggle', {
+    Text    = 'material',
+    Default = false
 })
-VRight:AddDropdown('WepOverrideMaterial', {
-    Values  = { 'ForceField', 'Glass', 'Neon', 'Plastic', 'SmoothPlastic' },
-    Default = 1,
-    Text    = 'Material'
+
+VLeftSelfStyle:AddToggle('SelfColorToggle', {
+    Text    = 'color',
+    Default = false
+}):AddColorPicker('SelfColorPicker', {
+    Default = Color3.fromRGB(255, 255, 255)
 })
-VRight:AddLabel('Weapon Color'):AddColorPicker('WepOverrideColor', { Default = Color3.fromRGB(168, 85, 247) })
-VRight:AddSlider('WepOverrideTrans', { Text = 'Transparency', Default = 0, Min = 0, Max = 100, Rounding = 0, Suffix = '%' })
 
-local originalWeaponState = {}
+VLeftSelfStyle:AddToggle('SelfDisableDecals', {
+    Text    = 'disable decals',
+    Default = false
+})
 
-RunService.RenderStepped:Connect(function()
-    if Toggles and Toggles.WepOverrideEnabled and Toggles.WepOverrideEnabled.Value then
-        local tool, _ = getCurrentTool()
-        if tool then
-            local targetSelect = Options and Options.WepTargetSelection and Options.WepTargetSelection.Value or "All Weapons"
-            local weaponName   = tool.Name
+VLeftSelfStyle:AddSlider('SelfTransSlider', {
+    Text     = 'transparency',
+    Default  = 100,
+    Min      = 0,
+    Max      = 100,
+    Rounding = 0,
+    Suffix   = '%'
+})
 
-            local matches = (targetSelect == "All Weapons") or weaponName:find(targetSelect, 1, true)
+VLeftSelfStyle:AddDropdown('SelfMaterialSelect', {
+    Values   = { 'ForceField', 'Neon', 'Glass', 'Plastic', 'SmoothPlastic' },
+    Default  = 1,
+    Text     = 'material'
+})
 
-            if matches then
-                local matName = Options and Options.WepOverrideMaterial and Options.WepOverrideMaterial.Value or "ForceField"
-                local color   = Options and Options.WepOverrideColor and Options.WepOverrideColor.Value or Color3.fromRGB(168, 85, 247)
-                local trans   = (Options and Options.WepOverrideTrans and Options.WepOverrideTrans.Value or 0) / 100
-                local enumMat = Enum.Material[matName] or Enum.Material.ForceField
+VLeftSelfEffects:AddToggle('SelfEffectsToggle', {
+    Text    = 'self effects',
+    Default = false
+})
 
-                for _, obj in ipairs(tool:GetDescendants()) do
-                    if obj:IsA("BasePart") or obj:IsA("MeshPart") then
-                        if not originalWeaponState[obj] then
-                            originalWeaponState[obj] = {
-                                Material     = obj.Material,
-                                Color        = obj.Color,
-                                Transparency = obj.Transparency,
-                                TextureID    = obj:IsA("MeshPart") and obj.TextureID or nil
-                            }
-                        end
+VLeftSelfEffects:AddDropdown('SelfEffectsSelect', {
+    Values   = { 'Aura', 'Sparkles', 'Ghost Trail', 'Fire' },
+    Default  = 1,
+    Text     = 'effects select'
+})
 
-                        obj.Material     = enumMat
-                        obj.Color        = color
-                        obj.Transparency = trans
+-- ────────────────────────────────────────
+-- 2. TOOL STYLE (Right 1)
+-- ────────────────────────────────────────
+VRightTool:AddToggle('ToolMaterialToggle', {
+    Text    = 'material',
+    Default = false
+})
 
-                        if obj:IsA("MeshPart") and (matName == "ForceField" or matName == "Glass" or matName == "Neon") then
-                            obj.TextureID = ""
-                        end
-                    elseif obj:IsA("SpecialMesh") then
-                        if not originalWeaponState[obj] then
-                            originalWeaponState[obj] = { TextureId = obj.TextureId }
-                        end
-                        if matName == "ForceField" or matName == "Glass" or matName == "Neon" then
-                            obj.TextureId = ""
-                        end
-                    elseif obj:IsA("SurfaceAppearance") then
-                        obj.Enabled = false
-                    end
+VRightTool:AddToggle('ToolColorToggle', {
+    Text    = 'color',
+    Default = false
+}):AddColorPicker('ToolColorPicker', {
+    Default = Color3.fromRGB(0, 0, 255)
+})
+
+VRightTool:AddToggle('ToolDisableDecals', {
+    Text    = 'disable decals',
+    Default = false
+})
+
+VRightTool:AddSlider('ToolTransSlider', {
+    Text     = 'transparency',
+    Default  = 100,
+    Min      = 0,
+    Max      = 100,
+    Rounding = 0,
+    Suffix   = '%'
+})
+
+VRightTool:AddDropdown('ToolMaterialSelect', {
+    Values   = { 'Neon', 'ForceField', 'Glass', 'Plastic', 'SmoothPlastic' },
+    Default  = 1,
+    Text     = 'material'
+})
+
+-- ────────────────────────────────────────
+-- 3. TRACER TABBOX (override tracer | custom tracers)
+-- ────────────────────────────────────────
+VLeftOverrideTracer:AddToggle('DisableTracersToggle', {
+    Text    = 'disable tracers',
+    Default = false
+})
+
+VLeftOverrideTracer:AddDropdown('TracerDisableValue', {
+    Values   = { 'local', 'all', 'others' },
+    Default  = 1,
+    Text     = 'disable value'
+})
+
+VLeftOverrideTracer:AddToggle('SelectedTracerToggle', {
+    Text    = 'selected tracer',
+    Default = false
+})
+
+VLeftOverrideTracer:AddDropdown('TracerSelect', {
+    Values   = { 'random', 'laser', 'beam', 'purple', 'rainbow', 'fire' },
+    Default  = 1,
+    Text     = 'tracer'
+})
+
+VLeftCustomTracers:AddToggle('SelfTracersToggle', {
+    Text    = 'self tracers',
+    Default = false
+})
+
+VLeftCustomTracers:AddToggle('CustomTracersToggle', {
+    Text    = 'custom tracers',
+    Default = false
+}):AddColorPicker('CustomTracerColor', {
+    Default = Color3.fromRGB(168, 85, 247)
+})
+
+-- ────────────────────────────────────────
+-- 4. HIT TABBOX (hit effects | hit sounds)
+-- ────────────────────────────────────────
+VRightHitEffects:AddToggle('HitEffectsEnabled', {
+    Text    = 'enabled',
+    Default = false
+}):AddColorPicker('HitColorPicker1', {
+    Default = Color3.fromRGB(0, 85, 255)
+}):AddColorPicker('HitColorPicker2', {
+    Default = Color3.fromRGB(0, 0, 255)
+})
+
+VRightHitEffects:AddToggle('HitWeldToggle', {
+    Text    = 'weld to player',
+    Default = false
+})
+
+VRightHitEffects:AddDropdown('HitEffectsSelected', {
+    Values   = { 'Electricity, Lightning, Thunder', 'Sparks', 'Blood', 'Fire' },
+    Default  = 1,
+    Text     = 'effects selected'
+})
+
+VRightHitEffects:AddDropdown('HitEffectSettings', {
+    Values   = { '--', 'Pulse', 'Explode' },
+    Default  = 1,
+    Text     = 'effect settings'
+})
+
+VRightHitEffects:AddDropdown('HitPreferredMaterial', {
+    Values   = { 'Neon', 'ForceField', 'Glass' },
+    Default  = 1,
+    Text     = 'preferred material'
+})
+
+VRightHitSounds:AddToggle('HitSoundsEnabled', {
+    Text    = 'hit sound enabled',
+    Default = false
+})
+
+VRightHitSounds:AddDropdown('HitSoundSelect', {
+    Values   = { 'Bell', 'Skeet', 'Neverlose', 'Baimless', 'Rust', 'TF2' },
+    Default  = 1,
+    Text     = 'hit sound'
+})
+
+-- ────────────────────────────────────────
+-- 5. OVERRIDE SHOOT SOUND (Left 3)
+-- ────────────────────────────────────────
+VLeftShootSnd:AddToggle('OverrideShootSndToggle', {
+    Text    = 'enabled',
+    Default = false
+})
+
+VLeftShootSnd:AddDropdown('OverrideShootSndSelect', {
+    Values   = { 'Laser', 'Heavy Gun', 'AWP', 'Deagle', 'M4A1' },
+    Default  = 1,
+    Text     = 'shoot sound'
+})
+
+-- ────────────────────────────────────────
+-- 6. CROSSHAIR (Left 4)
+-- ────────────────────────────────────────
+VLeftCrosshair:AddToggle('CrosshairEnabled', {
+    Text    = 'enabled',
+    Default = false
+}):AddColorPicker('CrosshairColor1', {
+    Default = Color3.fromRGB(0, 85, 255)
+}):AddColorPicker('CrosshairColor2', {
+    Default = Color3.fromRGB(0, 0, 255)
+})
+
+VLeftCrosshair:AddToggle('CrosshairOutline', {
+    Text    = 'outline',
+    Default = true
+}):AddColorPicker('CrosshairOutlineColor', {
+    Default = Color3.fromRGB(0, 0, 0)
+})
+
+VLeftCrosshair:AddSlider('CrosshairRot', {
+    Text     = 'rotation',
+    Default  = 0,
+    Min      = 0,
+    Max      = 360,
+    Rounding = 0,
+    Suffix   = '°'
+})
+
+VLeftCrosshair:AddSlider('CrosshairRotSpeedVal', {
+    Text     = 'speed',
+    Default  = 9,
+    Min      = 0,
+    Max      = 50,
+    Rounding = 0,
+    Suffix   = 'rps'
+})
+
+VLeftCrosshair:AddSlider('CrosshairBounceVal', {
+    Text     = 'bounce',
+    Default  = 0,
+    Min      = 0,
+    Max      = 20,
+    Rounding = 0,
+    Suffix   = 'px'
+})
+
+VLeftCrosshair:AddSlider('CrosshairBounceSpdVal', {
+    Text     = 'speed',
+    Default  = 10,
+    Min      = 1,
+    Max      = 50,
+    Rounding = 0,
+    Suffix   = 'x'
+})
+
+VLeftCrosshair:AddSlider('CrosshairOffsetVal', {
+    Text     = 'offset',
+    Default  = 5,
+    Min      = 0,
+    Max      = 30,
+    Rounding = 0,
+    Suffix   = 'px'
+})
+
+VLeftCrosshair:AddSlider('CrosshairLengthVal', {
+    Text     = 'length',
+    Default  = 20,
+    Min      = 2,
+    Max      = 50,
+    Rounding = 0,
+    Suffix   = 'px'
+})
+
+VLeftCrosshair:AddSlider('CrosshairThicknessVal', {
+    Text     = 'thickness',
+    Default  = 2,
+    Min      = 1,
+    Max      = 10,
+    Rounding = 0,
+    Suffix   = 'px'
+})
+
+VLeftCrosshair:AddSlider('CrosshairLerpVal', {
+    Text     = 'lerp',
+    Default  = 10,
+    Min      = 1,
+    Max      = 10,
+    Rounding = 0,
+    Suffix   = 'x'
+})
+
+VLeftCrosshair:AddDropdown('CrosshairPositionSelect', {
+    Values   = { '--', 'Center', 'Mouse' },
+    Default  = 1,
+    Text     = 'position'
+})
+
+-- ────────────────────────────────────────
+-- 7. INDICATORS (Right 3) (NO Manipulation)
+-- ────────────────────────────────────────
+VRightInd:AddToggle('IndicatorAmmo', {
+    Text    = 'ammo',
+    Default = false
+}):AddColorPicker('IndicatorAmmoColor', {
+    Default = Color3.fromRGB(150, 160, 255)
+})
+
+VRightInd:AddSlider('IndicatorOffsetX', {
+    Text     = 'offset x',
+    Default  = 0,
+    Min      = -200,
+    Max      = 200,
+    Rounding = 0,
+    Suffix   = 'px'
+})
+
+VRightInd:AddSlider('IndicatorOffsetY', {
+    Text     = 'offset y',
+    Default  = 25,
+    Min      = -200,
+    Max      = 200,
+    Rounding = 0,
+    Suffix   = 'px'
+})
+
+VRightInd:AddDropdown('IndicatorFont', {
+    Values   = { 'proggy clean', 'UI', 'System', 'Plex', 'Monospace' },
+    Default  = 1,
+    Text     = 'font'
+})
+
+VRightInd:AddDropdown('IndicatorStyle', {
+    Values   = { 'lower', 'upper', 'capitalized' },
+    Default  = 1,
+    Text     = 'style'
+})
+
+-- ══════════════════════════════════════════════════════════════════════
+-- VISUAL RENDER ENGINES & ORIGINAL STATE RESTORATION FIXES
+-- ══════════════════════════════════════════════════════════════════════
+
+-- Caching for restoring original state when toggles are turned OFF
+local originalSelfState = {}
+local originalToolState = {}
+
+local function restoreSelfState()
+    for obj, state in pairs(originalSelfState) do
+        if obj and obj.Parent then
+            if state.Material then obj.Material = state.Material end
+            if state.Color then obj.Color = state.Color end
+            if state.Transparency ~= nil then obj.Transparency = state.Transparency end
+        end
+    end
+    originalSelfState = {}
+end
+
+local function restoreToolState()
+    for obj, state in pairs(originalToolState) do
+        if obj and obj.Parent then
+            if state.Material then obj.Material = state.Material end
+            if state.Color then obj.Color = state.Color end
+            if state.Transparency ~= nil then obj.Transparency = state.Transparency end
+        end
+    end
+    originalToolState = {}
+end
+
+-- Indicators Gui Setup
+local indScreenGui = Instance.new("ScreenGui")
+indScreenGui.Name = "HvH_Indicators_GUI"
+indScreenGui.ResetOnSpawn = false
+indScreenGui.IgnoreGuiInset = true
+pcall(function() indScreenGui.Parent = gethui and gethui() or game:GetService("CoreGui") end)
+
+local indAmmoLabel = Instance.new("TextLabel")
+indAmmoLabel.Name = "AmmoIndicator"
+indAmmoLabel.BackgroundTransparency = 1
+indAmmoLabel.Font = Enum.Font.Code
+indAmmoLabel.TextSize = 14
+indAmmoLabel.TextStrokeTransparency = 0.2
+indAmmoLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+indAmmoLabel.Visible = false
+indAmmoLabel.Parent = indScreenGui
+
+-- Artifact-Free Drawing Crosshair Engine
+local hasDrawing = pcall(function() return Drawing.new("Line") end)
+local drawingLines = {}
+local drawingOutlines = {}
+
+if hasDrawing then
+    for i = 1, 4 do
+        local outline = Drawing.new("Line")
+        outline.Visible = false
+        outline.Thickness = 3
+        outline.Color = Color3.fromRGB(0, 0, 0)
+        drawingOutlines[i] = outline
+
+        local line = Drawing.new("Line")
+        line.Visible = false
+        line.Thickness = 2
+        line.Color = Color3.fromRGB(0, 85, 255)
+        drawingLines[i] = line
+    end
+end
+
+local crosshairRotAngle = 0
+
+-- Main Visuals Render Loop with Proper Toggle Off Reset
+RunService.RenderStepped:Connect(function(dt)
+    local char = getChar()
+
+    -- 1. Self Style Override
+    local selfMatEnabled   = Toggles.SelfMaterialToggle and Toggles.SelfMaterialToggle.Value
+    local selfColorEnabled = Toggles.SelfColorToggle and Toggles.SelfColorToggle.Value
+    local selfDecalsDis    = Toggles.SelfDisableDecals and Toggles.SelfDisableDecals.Value
+    local selfTransActive  = (Options and Options.SelfTransSlider and Options.SelfTransSlider.Value < 100)
+
+    if (selfMatEnabled or selfColorEnabled or selfDecalsDis or selfTransActive) and char then
+        local selfTransVal = (Options and Options.SelfTransSlider and Options.SelfTransSlider.Value or 100) / 100
+        local selfMatName  = Options and Options.SelfMaterialSelect and Options.SelfMaterialSelect.Value or "ForceField"
+        local selfColor    = Options and Options.SelfColorPicker and Options.SelfColorPicker.Value or Color3.fromRGB(255, 255, 255)
+        local enumMat      = Enum.Material[selfMatName] or Enum.Material.ForceField
+
+        for _, obj in ipairs(char:GetChildren()) do
+            if obj:IsA("BasePart") and not obj:IsA("Tool") then
+                if not originalSelfState[obj] then
+                    originalSelfState[obj] = {
+                        Material = obj.Material,
+                        Color = obj.Color,
+                        Transparency = obj.Transparency
+                    }
                 end
+                if selfMatEnabled then obj.Material = enumMat end
+                if selfColorEnabled then obj.Color = selfColor end
+                if selfTransActive then obj.Transparency = 1 - selfTransVal end
+            elseif obj:IsA("Decal") then
+                if not originalSelfState[obj] then
+                    originalSelfState[obj] = { Transparency = obj.Transparency }
+                end
+                if selfDecalsDis then obj.Transparency = 1 end
             end
         end
     else
-        for obj, orig in pairs(originalWeaponState) do
-            if obj and obj.Parent then
-                if orig.Material then obj.Material = orig.Material end
-                if orig.Color then obj.Color = orig.Color end
-                if orig.Transparency then obj.Transparency = orig.Transparency end
-                if orig.TextureID and obj:IsA("MeshPart") then obj.TextureID = orig.TextureID end
-                if orig.TextureId and obj:IsA("SpecialMesh") then obj.TextureId = orig.TextureId end
+        if next(originalSelfState) ~= nil then
+            restoreSelfState()
+        end
+    end
+
+    -- 2. Tool Style Override
+    local toolMatEnabled   = Toggles.ToolMaterialToggle and Toggles.ToolMaterialToggle.Value
+    local toolColorEnabled = Toggles.ToolColorToggle and Toggles.ToolColorToggle.Value
+    local toolDecalsDis    = Toggles.ToolDisableDecals and Toggles.ToolDisableDecals.Value
+    local toolTransActive  = (Options and Options.ToolTransSlider and Options.ToolTransSlider.Value < 100)
+
+    local tool, _ = getCurrentTool()
+    if (toolMatEnabled or toolColorEnabled or toolDecalsDis or toolTransActive) and tool then
+        local toolTransVal  = (Options and Options.ToolTransSlider and Options.ToolTransSlider.Value or 100) / 100
+        local toolMatName   = Options and Options.ToolMaterialSelect and Options.ToolMaterialSelect.Value or "Neon"
+        local toolColor     = Options and Options.ToolColorPicker and Options.ToolColorPicker.Value or Color3.fromRGB(0, 0, 255)
+        local enumMat       = Enum.Material[toolMatName] or Enum.Material.Neon
+
+        for _, obj in ipairs(tool:GetDescendants()) do
+            if obj:IsA("BasePart") or obj:IsA("MeshPart") then
+                if not originalToolState[obj] then
+                    originalToolState[obj] = {
+                        Material = obj.Material,
+                        Color = obj.Color,
+                        Transparency = obj.Transparency
+                    }
+                end
+                if toolMatEnabled then obj.Material = enumMat end
+                if toolColorEnabled then obj.Color = toolColor end
+                if toolTransActive then obj.Transparency = 1 - toolTransVal end
+            elseif obj:IsA("Decal") then
+                if not originalToolState[obj] then
+                    originalToolState[obj] = { Transparency = obj.Transparency }
+                end
+                if toolDecalsDis then obj.Transparency = 1 end
             end
         end
-        originalWeaponState = {}
+    else
+        if next(originalToolState) ~= nil then
+            restoreToolState()
+        end
+    end
+
+    -- 3. Artifact-Free Crosshair Engine
+    if Toggles.CrosshairEnabled and Toggles.CrosshairEnabled.Value and hasDrawing then
+        local viewport = camera.ViewportSize
+        local center   = Vector2.new(viewport.X / 2, viewport.Y / 2)
+        local mousePos = UserInputService:GetMouseLocation()
+        local posType  = Options.CrosshairPositionSelect and Options.CrosshairPositionSelect.Value or "Center"
+        local origin   = (posType == "Mouse") and mousePos or center
+
+        local rotSpeed = (Options.CrosshairRotSpeedVal and Options.CrosshairRotSpeedVal.Value or 9) / 10
+        crosshairRotAngle = (crosshairRotAngle + dt * rotSpeed * 360) % 360
+
+        local rot      = math.rad(Options.CrosshairRot and Options.CrosshairRot.Value or 0) + math.rad(crosshairRotAngle)
+        local offset   = Options.CrosshairOffsetVal and Options.CrosshairOffsetVal.Value or 5
+        local length   = Options.CrosshairLengthVal and Options.CrosshairLengthVal.Value or 20
+        local thick    = Options.CrosshairThicknessVal and Options.CrosshairThicknessVal.Value or 2
+        local mainCol  = Options.CrosshairColor1 and Options.CrosshairColor1.Value or Color3.fromRGB(0, 85, 255)
+        local drawOutline = Toggles.CrosshairOutline and Toggles.CrosshairOutline.Value
+        local outlineCol  = Options.CrosshairOutlineColor and Options.CrosshairOutlineColor.Value or Color3.fromRGB(0, 0, 0)
+
+        for i = 1, 4 do
+            local angle = rot + (i - 1) * (math.pi / 2)
+            local dir   = Vector2.new(math.cos(angle), math.sin(angle))
+            local p1    = origin + dir * offset
+            local p2    = p1 + dir * length
+
+            if drawOutline then
+                local ol = drawingOutlines[i]
+                ol.Visible = true
+                ol.From = p1
+                ol.To = p2
+                ol.Thickness = thick + 2
+                ol.Color = outlineCol
+            else
+                if hasDrawing and drawingOutlines[i] then drawingOutlines[i].Visible = false end
+            end
+
+            local l = drawingLines[i]
+            l.Visible = true
+            l.From = p1
+            l.To = p2
+            l.Thickness = thick
+            l.Color = mainCol
+        end
+    else
+        if hasDrawing then
+            for i = 1, 4 do
+                if drawingLines[i] then drawingLines[i].Visible = false end
+                if drawingOutlines[i] then drawingOutlines[i].Visible = false end
+            end
+        end
+    end
+
+    -- 4. Indicators Engine (Ammo Display)
+    if Toggles.IndicatorAmmo and Toggles.IndicatorAmmo.Value then
+        local offX = Options.IndicatorOffsetX and Options.IndicatorOffsetX.Value or 0
+        local offY = Options.IndicatorOffsetY and Options.IndicatorOffsetY.Value or 25
+        local col  = Options.IndicatorAmmoColor and Options.IndicatorAmmoColor.Value or Color3.fromRGB(150, 160, 255)
+        local style= Options.IndicatorStyle and Options.IndicatorStyle.Value or "lower"
+
+        local ammoVal = "0"
+        if tool then
+            local ammoObj = tool:FindFirstChild("Ammo") or tool:FindFirstChild("AmmoClient")
+            if ammoObj then ammoVal = tostring(ammoObj.Value) end
+        end
+
+        local textStr = "ammo: " .. ammoVal
+        if style == "upper" then
+            textStr = string.upper(textStr)
+        elseif style == "capitalized" then
+            textStr = "Ammo: " .. ammoVal
+        end
+
+        local viewport = camera.ViewportSize
+        indAmmoLabel.Visible = true
+        indAmmoLabel.Text = textStr
+        indAmmoLabel.TextColor3 = col
+        indAmmoLabel.Position = UDim2.new(0, (viewport.X / 2) + offX - 50, 0, (viewport.Y / 2) + offY)
+        indAmmoLabel.Size = UDim2.new(0, 100, 0, 20)
+    else
+        indAmmoLabel.Visible = false
     end
 end)
 
@@ -1802,7 +2187,15 @@ MenuBox:AddButton('Unload Script', function()
         if flyCon then flyCon:Disconnect() end
         if antiAfkCon then antiAfkCon:Disconnect() end
         if espScreenGui then espScreenGui:Destroy() end
-        -- Restore lighting on unload
+        if indScreenGui then indScreenGui:Destroy() end
+        restoreSelfState()
+        restoreToolState()
+        if hasDrawing then
+            for i = 1, 4 do
+                if drawingLines[i] then drawingLines[i]:Remove() end
+                if drawingOutlines[i] then drawingOutlines[i]:Remove() end
+            end
+        end
         Lighting.ClockTime  = _origClock
         Lighting.FogEnd     = _origFogEnd
         Lighting.FogStart   = _origFogStart
