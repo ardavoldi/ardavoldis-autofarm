@@ -440,7 +440,7 @@ end)
 -- ══════════════════════════════════════════════════════════════════════
 -- 2. RAGEBOT TAB
 -- ══════════════════════════════════════════════════════════════════════
-local RLeft   = Tabs.Ragebot:AddLeftGroupbox('Auto Kill / Stomp Combo')
+local RLeft   = Tabs.Ragebot:AddLeftGroupbox('Auto Farm(Wanted)')
 local RRight  = Tabs.Ragebot:AddRightGroupbox('Orbit / Strafe Mode')
 local RLeft2  = Tabs.Ragebot:AddLeftGroupbox('Resolver')
 local RRight2 = Tabs.Ragebot:AddRightGroupbox('Quick Actions')
@@ -482,7 +482,7 @@ RLeft:AddSlider('ShootDelayMs', {
 
 local autoKillCon
 RLeft:AddToggle('AutoKillToggle', {
-    Text    = 'Auto Kill + Auto Stomp',
+    Text    = 'Start Autofarm',
     Default = false,
     Tooltip = 'Equips weapon, locks head, fires, and stomps downed targets',
     Callback = function(val)
@@ -615,7 +615,7 @@ RLeft2:AddToggle('ResolverToggle', {
 })
 
 RLeft2:AddDropdown('ResolverMode', {
-    Values   = { 'Angle Cycle', 'Random', 'Flip 180' },
+    Values   = { 'ecco siken', 'Random', 'Flip 180' },
     Default  = 1,
     Text     = 'Resolver Mode',
     Callback = function(val)
