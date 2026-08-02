@@ -417,8 +417,8 @@ local Tabs = {
 -- ══════════════════════════════════════════════════════════════════════
 -- 1. MAIN TAB
 -- ══════════════════════════════════════════════════════════════════════
-local MInfo   = Tabs.Main:AddLeftGroupbox('Information')
-local MTarget = Tabs.Main:AddRightGroupbox('Targeting')
+local MInfo   = Tabs.Main:AddLeftGroupbox('Info - press rightctrl to close gui')
+local MTarget = Tabs.Main:AddRightGroupbox('if new joiners doesnt loading on autofarm use here')
 
 MInfo:AddLabel('Status: Idle')
 MInfo:AddLabel('Game: ' .. gameName)
